@@ -1,0 +1,2 @@
+string_size,avg,max,min,sd,params
+,,,,,"n = 1, l = 10, l_upper = 10, runs = 10, new_strings = False, base = 2, exp = 13"
