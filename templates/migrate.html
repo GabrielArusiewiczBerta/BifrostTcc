@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Migrar Transação Entre Blockchains{% endblock %}
+{% block page_subtitle %}Transferência e gravação de payload existente para uma nova blockchain alvo (função migrate()){% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-right-left" style="color: var(--primary);"></i> Migração Cross-Chain de Transação
+    </h3>
+
+    <form method="POST" action="{% url 'migrate' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="source_hash">Hash da Transação de Origem:</label>
+            <input type="text" name="source_hash" id="source_hash" class="form-input" placeholder="Informe o hash da transação que deseja copiar/migrar" required>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="target_blockchain">Selecione a Blockchain de Destino:</label>
+            <select name="target_blockchain" id="target_blockchain" class="form-select">
+                {% for bc in blockchains %}
+                <option value="{{ bc.code }}">
+                    {{ bc.name }} (Limite: {{ bc.max_size }} por transação)
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="toggle-group">
+            <label class="toggle-label">
+                <input type="checkbox" name="multiple_tx" checked>
+                <span>Permitir divisão em múltiplas transações se o payload exceder a capacidade da blockchain alvo</span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn-submit">
+            <i class="fa-solid fa-arrows-spin"></i> Executar Migração Cross-Chain
+        </button>
+    </form>
+</div>
+
+{% if migration_result %}
+<div class="glass-card" style="max-width: 850px; margin: 2rem auto 0 auto; border-color: rgba(99, 102, 241, 0.4);">
+    <h3 style="color: var(--primary); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-circle-check"></i> Relatório de Migração Concluída
+    </h3>
+
+    <div style="background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.95rem;">
+        <p style="margin-bottom: 0.5rem;"><strong>Blockchain de Origem:</strong> <span class="badge-tag amber">{{ migration_result.source_blockchain }}</span></p>
+        <p style="margin-bottom: 0.5rem;"><strong>Blockchain de Destino:</strong> <span class="badge-tag emerald">{{ migration_result.target_blockchain }}</span></p>
+        <p style="margin-bottom: 1rem;"><strong>Hash de Origem:</strong> <span class="hash-badge">{{ migration_result.source_hash }}</span></p>
+
+        <strong style="display: block; margin-bottom: 0.5rem; color: var(--cyan);">Novos Hashes Gerados na Blockchain de Destino:</strong>
+        {% for h in migration_result.new_hashes %}
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+            <span class="hash-badge" style="flex: 1;">{{ h }}</span>
+            <button onclick="copyToClipboard('{{ h }}')" style="background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;">
+                <i class="fa-regular fa-copy"></i> Copiar
+            </button>
+        </div>
+        {% endfor %}
+
+        <div style="margin-top: 1rem;">
+            <strong style="display: block; margin-bottom: 0.4rem; color: var(--text-muted);">Payload Migrado:</strong>
+            <div style="background: rgba(15, 23, 42, 0.9); padding: 1rem; border-radius: 6px; font-family: monospace;">{{ migration_result.payload_migrated }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Painel Principal - Visão Geral do Bifröst{% endblock %}
+{% block page_subtitle %}Monitoramento em tempo real dos nós conectores e ledger de transações{% endblock %}
+
+{% block content %}
+<!-- Stat Metrics Cards -->
+<div class="stats-grid">
+    <div class="glass-card stat-card">
+        <div class="stat-icon purple">
+            <i class="fa-solid fa-server"></i>
+        </div>
+        <div class="stat-info">
+            <div class="label">Nós Ativos</div>
+            <div class="value">{{ active_nodes_count }} Blockchains</div>
+        </div>
+    </div>
+
+    <div class="glass-card stat-card">
+        <div class="stat-icon cyan">
+            <i class="fa-solid fa-hashtag"></i>
+        </div>
+        <div class="stat-info">
+            <div class="label">Total de Transações</div>
+            <div class="value">{{ total_transactions }}</div>
+        </div>
+    </div>
+
+    <div class="glass-card stat-card">
+        <div class="stat-icon emerald">
+            <i class="fa-solid fa-shield-halved"></i>
+        </div>
+        <div class="stat-info">
+            <div class="label">Segurança</div>
+            <div class="value">PBKDF2 + Notary</div>
+        </div>
+    </div>
+
+    <div class="glass-card stat-card">
+        <div class="stat-icon amber">
+            <i class="fa-solid fa-network-wired"></i>
+        </div>
+        <div class="stat-info">
+            <div class="label">Latência Média</div>
+            <div class="value">42 ms</div>
+        </div>
+    </div>
+</div>
+
+<!-- Nodes Grid -->
+<div class="section-header">
+    <h3><i class="fa-solid fa-cubes-stacked" style="color: var(--cyan);"></i> Adaptadores & Redes Blockchain Conectadas</h3>
+</div>
+
+<div class="nodes-grid">
+    {% for bc in blockchains %}
+    <div class="glass-card node-card {{ bc.badge }}">
+        <div class="node-header">
+            <div class="node-title">
+                <i class="fa-brands {{ bc.icon }}"></i>
+                <h4>{{ bc.name }}</h4>
+            </div>
+            <span class="badge-tag {{ bc.badge }}">{{ bc.status }}</span>
+        </div>
+        <div class="node-meta">
+            <div class="meta-row">
+                <span>Tipo:</span>
+                <strong>{{ bc.type }}</strong>
+            </div>
+            <div class="meta-row">
+                <span>Payload máx/tx:</span>
+                <strong style="color: var(--cyan);">{{ bc.max_size }}</strong>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Recent Activity Table -->
+<div class="glass-card" style="margin-top: 1rem;">
+    <div class="section-header">
+        <h3><i class="fa-solid fa-clock-rotate-left" style="color: var(--primary);"></i> Últimas Transações Registradas</h3>
+        <a href="{% url 'explorer' %}" class="nav-link" style="padding: 0.4rem 0.8rem; font-size: 0.85rem; background: rgba(255,255,255,0.05);">Ver todas <i class="fa-solid fa-arrow-right"></i></a>
+    </div>
+
+    {% if recent_transactions %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead>
+                <tr>
+                    <th>Hash da Transação</th>
+                    <th>Blockchain</th>
+                    <th>Criptografia</th>
+                    <th>Prévia do Dado</th>
+                    <th>Data / Hora</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in recent_transactions %}
+                <tr>
+                    <td>
+                        <span class="hash-badge">{{ tx.hash|slice:":18" }}...</span>
+                    </td>
+                    <td>
+                        <span class="badge-tag indigo">{{ tx.blockchain_name }}</span>
+                    </td>
+                    <td>
+                        {% if tx.salt %}
+                        <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-lock"></i> Protegido</span>
+                        {% else %}
+                        <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Texto Puro</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: var(--text-muted);">{{ tx.payload_preview|default:"Payload de dados" }}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-dim);">{{ tx.issued_at|slice:":19" }}</td>
+                    <td>
+                        <a href="{% url 'retrieve' %}?hash={{ tx.hash }}" class="nav-link" style="display: inline-flex; padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(6, 182, 212, 0.15); color: var(--cyan);">
+                            <i class="fa-solid fa-magnifying-glass"></i> Consultar
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); text-align: center; padding: 2rem;">Nenhuma transação registrada no momento. Acesse a aba "Armazenar Dados" para criar a primeira transação!</p>
+    {% endif %}
+</div>
+{% endblock %}

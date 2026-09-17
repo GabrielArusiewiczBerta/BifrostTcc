@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Armazenar Dados na Blockchain{% endblock %}
+{% block page_subtitle %}Gravação de dados arbitrários em ledgers através do adaptador Bifröst (função store()){% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-cloud-arrow-up" style="color: var(--cyan);"></i> Formulário de Armazenamento Multi-Chain
+    </h3>
+
+    <form method="POST" action="{% url 'store' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="blockchain">Selecione a Blockchain Alvo:</label>
+            <select name="blockchain" id="blockchain" class="form-select">
+                {% for bc in blockchains %}
+                <option value="{{ bc.code }}">
+                    {{ bc.name }} (Limite: {{ bc.max_size }} por transação)
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="payload">Conteúdo / Dado a Armazenar:</label>
+            <textarea name="payload" id="payload" class="form-textarea" placeholder="Digite ou cole aqui a informação ou dados que deseja gravar na blockchain..." required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="password"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Senha de Criptografia no Cliente (Opcional):</label>
+            <input type="password" name="password" id="password" class="form-input" placeholder="Se fornecida, o dado será criptografado com PBKDF2/Salt antes de ser enviado à blockchain">
+        </div>
+
+        <div class="toggle-group">
+            <label class="toggle-label">
+                <input type="checkbox" name="multiple_tx" checked>
+                <span>Permitir fragmentação em múltiplas transações (multiple_tx) se exceder o limite</span>
+            </label>
+
+            <label class="toggle-label">
+                <input type="checkbox" name="redundancy">
+                <span>Criar cópia de redundância em espelho PostgreSQL</span>
+            </label>
+        </div>
+
+        <button type="submit" class="btn-submit">
+            <i class="fa-solid fa-paper-plane"></i> Enviar e Gravar na Blockchain
+        </button>
+    </form>
+</div>
+
+{% if success_result %}
+<div class="glass-card" style="max-width: 850px; margin: 2rem auto 0 auto; border-color: rgba(16, 185, 129, 0.4);">
+    <h3 style="color: var(--emerald); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-circle-check"></i> Resultado da Gravação na Blockchain
+    </h3>
+
+    <div style="background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.9rem;">
+        <p style="margin-bottom: 0.5rem;"><strong>Blockchain Alvo:</strong> <span class="badge-tag indigo">{{ success_result.blockchain }}</span></p>
+        <p style="margin-bottom: 0.5rem;"><strong>Total de Hashes Gerados:</strong> {{ success_result.count }}</p>
+        <p style="margin-bottom: 1rem;"><strong>Proteção por Criptografia:</strong> {% if success_result.encrypted %}<span style="color: var(--emerald);">Ativa (Salt/Chave)</span>{% else %}<span style="color: var(--text-dim);">Não (Texto Puro)</span>{% endif %}</p>
+
+        <strong style="display: block; margin-bottom: 0.5rem; color: var(--cyan);">Hashes de Transação (Guarde estes hashes para recuperar o dado):</strong>
+        {% for h in success_result.hashes %}
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+            <span class="hash-badge" style="flex: 1;">{{ h }}</span>
+            <button onclick="copyToClipboard('{{ h }}')" style="background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;">
+                <i class="fa-regular fa-copy"></i> Copiar
+            </button>
+            <a href="{% url 'retrieve' %}?hash={{ h }}" style="background: rgba(6, 182, 212, 0.2); color: var(--cyan); text-decoration: none; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem;">
+                <i class="fa-solid fa-magnifying-glass"></i> Testar Busca
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

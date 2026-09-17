@@ -1,0 +1,99 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Bifröst Blockchain Interoperability API{% endblock %}</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+</head>
+<body>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">
+                <i class="fa-solid fa-cube"></i>
+            </div>
+            <div class="brand-text">
+                <h1>Bifröst API</h1>
+            </div>
+        </div>
+
+        <ul class="nav-menu">
+            <li>
+                <a href="{% url 'dashboard' %}" class="nav-link {% if active_tab == 'dashboard' %}active{% endif %}">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Painel Principal</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'store' %}" class="nav-link {% if active_tab == 'store' %}active{% endif %}">
+                    <i class="fa-solid fa-upload"></i>
+                    <span>Armazenar Dados</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'retrieve' %}" class="nav-link {% if active_tab == 'retrieve' %}active{% endif %}">
+                    <i class="fa-solid fa-download"></i>
+                    <span>Recuperar Dados</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'migrate' %}" class="nav-link {% if active_tab == 'migrate' %}active{% endif %}">
+                    <i class="fa-solid fa-right-left"></i>
+                    <span>Migrar Blockchain</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'explorer' %}" class="nav-link {% if active_tab == 'explorer' %}active{% endif %}">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Explorador de Ledes</span>
+                </a>
+            </li>
+        </ul>
+    </aside>
+
+    <!-- Main Wrapper -->
+    <main class="main-wrapper">
+        <header class="top-header">
+            <div class="header-title">
+                <h2>{% block page_title %}Plataforma de Interoperabilidade Blockchain{% endblock %}</h2>
+                <p>{% block page_subtitle %}API de Abstração Genérica para Comunicação Multi-Chain (Notary Scheme){% endblock %}</p>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span>Notary Nodes Operacionais (7/7)</span>
+            </div>
+        </header>
+
+        {% if messages %}
+        <div class="messages-container">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">
+                <i class="fa-solid {% if message.tags == 'success' %}fa-circle-check{% else %}fa-circle-exclamation{% endif %}"></i>
+                <span>{{ message }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text);
+            alert('Hash copiado para a área de transferência: ' + text);
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
