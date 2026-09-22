@@ -1,11 +1,31 @@
 import hashlib
 import uuid
+import core_bifrost.db_manager as db
 from core_bifrost.custom_errors import TransactionSizeError
 from core_bifrost.crypto_utils import encrypt_payload, decrypt_payload
 
+
+def split_by_bytes(text: str, limit: int):
+    """Divide o texto em pedaços de no máximo `limit` bytes UTF-8, sem quebrar caracteres."""
+    chunks, current, size = [], [], 0
+    for ch in text:
+        n = len(ch.encode('utf-8'))
+        if n > limit:
+            raise TransactionSizeError(f"O limite de {limit} bytes por transação é menor que um único caractere.")
+        if size + n > limit:
+            chunks.append(''.join(current))
+            current, size = [], 0
+        current.append(ch)
+        size += n
+    if current:
+        chunks.append(''.join(current))
+    return chunks
+
+
 class BaseAdapter:
     NAME = "Base"
-    MAX_SIZE = 1000  # Max bytes allowed per single transaction payload
+    MAX_SIZE = 1000  # bytes por transação
+    HASH_PREFIX = ""
 
     @classmethod
     def store_wrapper(cls, text: str, pw: str = None, multiple_tx: bool = False):
@@ -13,48 +33,32 @@ class BaseAdapter:
         key = ""
         if pw:
             text, salt, key = encrypt_payload(text, pw)
-            
-        data_bytes = text.encode('utf-8')
-        if len(data_bytes) > cls.MAX_SIZE and not multiple_tx:
+
+        chunks = split_by_bytes(text, cls.MAX_SIZE)
+        if len(chunks) > 1 and not multiple_tx:
             raise TransactionSizeError(
-                f"Tamanho dos dados ({len(data_bytes)} bytes) excede o limite máximo por transação "
+                f"Tamanho dos dados ({len(text.encode('utf-8'))} bytes) excede o limite máximo por transação "
                 f"da blockchain {cls.NAME} ({cls.MAX_SIZE} bytes). Ative 'multiple_tx=True' para permitir fragmentação."
             )
-            
-        # Fragment text if needed
-        chunks = []
-        if len(data_bytes) > cls.MAX_SIZE:
-            for i in range(0, len(text), cls.MAX_SIZE):
-                chunks.append(text[i:i + cls.MAX_SIZE])
-        else:
-            chunks = [text]
-            
-        hashes = []
-        for chunk in chunks:
-            tx_hash = cls.store_chunk(chunk)
-            hashes.append(tx_hash)
-            
+
+        hashes = [cls.store_chunk(chunk) for chunk in chunks]
         return hashes, salt, key
 
     @classmethod
     def store_chunk(cls, chunk: str) -> str:
-        # Override in specific adapters
-        tx_hash = hashlib.sha256(f"{cls.NAME}:{uuid.uuid4()}:{chunk}".encode('utf-8')).hexdigest()
+        """Simulação: grava no ledger local. Adaptadores reais sobrescrevem este método."""
+        tx_hash = cls.HASH_PREFIX + hashlib.sha256(f"{cls.__name__}:{uuid.uuid4()}:{chunk}".encode('utf-8')).hexdigest()
+        db.sim_put(tx_hash, cls.__name__, chunk)
         return tx_hash
 
     @classmethod
     def retrieve_wrapper(cls, transaction_hashes: list, pw: str = None, salt: str = None, key: str = None):
-        combined_text = ""
-        for tx_hash in transaction_hashes:
-            chunk = cls.retrieve_chunk(tx_hash)
-            combined_text += chunk
-            
+        combined_text = "".join(cls.retrieve_chunk(h) for h in transaction_hashes)
         if pw and salt:
-            combined_text = decrypt_payload(combined_text, pw, salt)
-            
+            combined_text = decrypt_payload(combined_text, pw, salt, key)
         return combined_text
 
     @classmethod
     def retrieve_chunk(cls, tx_hash: str) -> str:
-        # Override in specific adapters
-        return f"[Data retrieved for tx {tx_hash[:10]}]"
+        """Simulação: lê do ledger local. Levanta TransactionNotFoundError se não existir."""
+        return db.sim_get(tx_hash, cls.__name__)

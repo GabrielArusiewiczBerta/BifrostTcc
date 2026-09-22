@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block page_title %}Painel Principal - Visão Geral do Bifröst{% endblock %}
-{% block page_subtitle %}Monitoramento em tempo real dos nós conectores e ledger de transações{% endblock %}
+{% block page_subtitle %}Adaptadores disponíveis e ledger de transações (redes simuladas){% endblock %}
 
 {% block content %}
 <!-- Stat Metrics Cards -->
@@ -11,7 +11,7 @@
             <i class="fa-solid fa-server"></i>
         </div>
         <div class="stat-info">
-            <div class="label">Nós Ativos</div>
+            <div class="label">Adaptadores Disponíveis</div>
             <div class="value">{{ active_nodes_count }} Blockchains</div>
         </div>
     </div>
@@ -32,7 +32,7 @@
         </div>
         <div class="stat-info">
             <div class="label">Segurança</div>
-            <div class="value">PBKDF2 + Notary</div>
+            <div class="value">Cifra por senha (servidor)</div>
         </div>
     </div>
 
@@ -41,15 +41,15 @@
             <i class="fa-solid fa-network-wired"></i>
         </div>
         <div class="stat-info">
-            <div class="label">Latência Média</div>
-            <div class="value">42 ms</div>
+            <div class="label">Minhas Requisições</div>
+            <div class="value">{{ total_requests }}</div>
         </div>
     </div>
 </div>
 
 <!-- Nodes Grid -->
 <div class="section-header">
-    <h3><i class="fa-solid fa-cubes-stacked" style="color: var(--cyan);"></i> Adaptadores & Redes Blockchain Conectadas</h3>
+    <h3><i class="fa-solid fa-cubes-stacked" style="color: var(--cyan);"></i> Adaptadores & Redes Blockchain Disponíveis</h3>
 </div>
 
 <div class="nodes-grid">
@@ -106,7 +106,7 @@
                         <span class="badge-tag indigo">{{ tx.blockchain_name }}</span>
                     </td>
                     <td>
-                        {% if tx.salt %}
+                        {% if tx.encrypted %}
                         <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-lock"></i> Protegido</span>
                         {% else %}
                         <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Texto Puro</span>

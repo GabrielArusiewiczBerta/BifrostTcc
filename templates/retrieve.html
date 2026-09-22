@@ -42,7 +42,7 @@
         <p style="margin-bottom: 1rem;">
             <strong>Status de Criptografia:</strong> 
             {% if retrieved_result.encrypted %}
-            <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-shield-halved"></i> Criptografado (Salt/PBKDF2)</span>
+            <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-shield-halved"></i> {% if retrieved_result.decrypted %}Criptografado (senha verificada){% else %}Criptografado (informe a senha para decifrar){% endif %}</span>
             {% else %}
             <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Não Criptografado</span>
             {% endif %}
@@ -56,7 +56,7 @@
         </div>
 
         <div>
-            <strong style="display: block; margin-bottom: 0.5rem; color: var(--emerald);">Conteúdo / Payload Reconstituído:</strong>
+            <strong style="display: block; margin-bottom: 0.5rem; color: var(--emerald);">{% if retrieved_result.encrypted and not retrieved_result.decrypted %}Conteúdo cifrado (sem senha):{% else %}Conteúdo / Payload Reconstituído:{% endif %}</strong>
             <div style="background: rgba(15, 23, 42, 0.9); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-glass); white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.95rem; color: var(--text-main);">{{ retrieved_result.payload }}</div>
         </div>
     </div>

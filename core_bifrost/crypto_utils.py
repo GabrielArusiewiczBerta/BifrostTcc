@@ -1,28 +1,46 @@
 import base64
 import hashlib
+import hmac
 import os
 
-def encrypt_payload(data: str, password: str):
-    """Encrypt payload string using password and random salt (PBKDF2 + XOR/Base64 scheme)."""
-    salt = os.urandom(16).hex()
-    key = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-    
-    data_bytes = data.encode('utf-8')
-    encrypted_bytes = bytearray()
-    for i, b in enumerate(data_bytes):
-        encrypted_bytes.append(b ^ key[i % len(key)])
-        
-    encrypted_str = base64.b64encode(encrypted_bytes).decode('utf-8')
-    key_hash = hashlib.sha256(key).hexdigest()[:16]
-    return encrypted_str, salt, key_hash
+from cryptography.fernet import Fernet, InvalidToken
 
-def decrypt_payload(encrypted_str: str, password: str, salt: str):
-    """Decrypt payload using password and salt."""
-    key = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000)
-    encrypted_bytes = base64.b64decode(encrypted_str)
-    
-    decrypted_bytes = bytearray()
-    for i, b in enumerate(encrypted_bytes):
-        decrypted_bytes.append(b ^ key[i % len(key)])
-        
-    return decrypted_bytes.decode('utf-8', errors='ignore')
+from core_bifrost.custom_errors import DecryptionError
+
+ITERATIONS = 100_000
+
+
+def _derive_keys(password: str, salt: bytes):
+    """key_1 serve para verificar a senha; key_2 (derivada de senha + key_1) cifra os dados."""
+    pw = password.encode('utf-8')
+    key_1 = base64.urlsafe_b64encode(hashlib.pbkdf2_hmac('sha256', pw, salt, ITERATIONS, 32))
+    key_2 = base64.urlsafe_b64encode(hashlib.pbkdf2_hmac('sha256', pw + key_1, salt, ITERATIONS, 32))
+    return key_1, key_2
+
+
+def _verifier(key_1: bytes) -> str:
+    return hashlib.sha256(key_1).hexdigest()
+
+
+def encrypt_payload(data: str, password: str):
+    """Cifra com Fernet. Retorna (token, salt_hex, verificador_da_senha)."""
+    salt = os.urandom(16)
+    key_1, key_2 = _derive_keys(password, salt)
+    token = Fernet(key_2).encrypt(data.encode('utf-8')).decode('ascii')
+    return token, salt.hex(), _verifier(key_1)
+
+
+def verify_password(password: str, salt: str, verifier: str) -> bool:
+    key_1, _ = _derive_keys(password, bytes.fromhex(salt))
+    return hmac.compare_digest(_verifier(key_1), verifier)
+
+
+def decrypt_payload(token: str, password: str, salt: str, verifier: str) -> str:
+    """Decifra. Levanta DecryptionError se a senha estiver errada ou o dado estiver corrompido."""
+    key_1, key_2 = _derive_keys(password, bytes.fromhex(salt))
+    if not hmac.compare_digest(_verifier(key_1), verifier):
+        raise DecryptionError('Senha incorreta.')
+    try:
+        return Fernet(key_2).decrypt(token.encode('ascii')).decode('utf-8')
+    except InvalidToken:
+        raise DecryptionError('Dado corrompido ou incompleto: não foi possível decifrar.')

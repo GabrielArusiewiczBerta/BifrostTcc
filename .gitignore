@@ -25,3 +25,6 @@ env/
 *.swp
 *.tmp
 cloudflared
+
+# Chave secreta gerada localmente
+.secret_key

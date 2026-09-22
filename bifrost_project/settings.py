@@ -3,11 +3,51 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = 'django-insecure-bifrost-blockchain-interoperability-key'
+def _load_secret_key():
+    env_key = os.environ.get('BIFROST_SECRET_KEY')
+    if env_key:
+        return env_key
+    key_file = BASE_DIR / '.secret_key'
+    if key_file.exists():
+        return key_file.read_text().strip()
+    from django.core.management.utils import get_random_secret_key
+    key = get_random_secret_key()
+    key_file.write_text(key)
+    key_file.chmod(0o600)
+    return key
 
-DEBUG = True
 
-ALLOWED_HOSTS = ['*']
+def _lan_ip():
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(('8.8.8.8', 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+SECRET_KEY = _load_secret_key()
+
+# Desenvolvimento local por padrao. O start_public_server.py desliga com BIFROST_DEBUG=0.
+DEBUG = os.environ.get('BIFROST_DEBUG', '1').lower() not in ('0', 'false', 'no')
+
+# Hosts aceitos: localhost, o IP da rede local desta maquina e o tunel Cloudflare.
+# Outros hosts: BIFROST_ALLOWED_HOSTS="meu.dominio,outro.dominio"
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '[::1]', '.trycloudflare.com'] + [
+    h.strip() for h in os.environ.get('BIFROST_ALLOWED_HOSTS', '').split(',') if h.strip()
+]
+if _lan_ip():
+    ALLOWED_HOSTS.append(_lan_ip())
+
+# Acesso por outras maquinas.
+# Atras do tunel Cloudflare o navegador usa HTTPS, mas o Django recebe HTTP em
+# 127.0.0.1. Sem esta lista, todo POST (Armazenar, Recuperar, Migrar) falha com
+# "403 CSRF verification failed. Origin checking failed".
+# Para outro dominio/tunel, defina BIFROST_TRUSTED_ORIGINS="https://meu.dominio,https://outro.dominio"
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.trycloudflare.com',
+] + [o.strip() for o in os.environ.get('BIFROST_TRUSTED_ORIGINS', '').split(',') if o.strip()]
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -56,7 +96,15 @@ DATABASES = {
     }
 }
 
-AUTH_PASSWORD_VALIDATORS = []
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': 8}},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+]
+
+LOGIN_URL = 'login'
+LOGIN_REDIRECT_URL = 'dashboard'
+LOGOUT_REDIRECT_URL = 'login'
 
 LANGUAGE_CODE = 'pt-br'
 

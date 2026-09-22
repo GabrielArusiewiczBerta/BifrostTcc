@@ -1,0 +1,87 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Contabilidade (Administrador){% endblock %}
+{% block page_subtitle %}Gasto estimado por blockchain e por usuário, com base na estimativa de custo de cada envio{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; align-items: center;">
+    <span style="color: var(--text-muted);">Período:</span>
+    {% for value, label in periods %}
+    <a href="?period={{ value }}&order={{ order }}" class="nav-link {% if period == value %}active{% endif %}" style="padding: 0.4rem 0.9rem;">{{ label }}</a>
+    {% endfor %}
+    <span style="color: var(--text-muted); margin-left: 1rem;">Ordenar por:</span>
+    <a href="?period={{ period }}&order=cost" class="nav-link {% if order == 'cost' %}active{% endif %}" style="padding: 0.4rem 0.9rem;">Gasto</a>
+    <a href="?period={{ period }}&order=txs" class="nav-link {% if order == 'txs' %}active{% endif %}" style="padding: 0.4rem 0.9rem;">Transações</a>
+    <a href="?period={{ period }}&order=bytes" class="nav-link {% if order == 'bytes' %}active{% endif %}" style="padding: 0.4rem 0.9rem;">Volume</a>
+</div>
+
+<div class="stats-grid">
+    <div class="glass-card stat-card">
+        <div class="stat-icon amber"><i class="fa-solid fa-coins"></i></div>
+        <div class="stat-info"><div class="label">Gasto estimado total</div><div class="value">US$ {{ totals.cost|default:0|floatformat:4 }}</div></div>
+    </div>
+    <div class="glass-card stat-card">
+        <div class="stat-icon cyan"><i class="fa-solid fa-hashtag"></i></div>
+        <div class="stat-info"><div class="label">Transações on-chain</div><div class="value">{{ totals.txs|default:0 }}</div></div>
+    </div>
+    <div class="glass-card stat-card">
+        <div class="stat-icon purple"><i class="fa-solid fa-users"></i></div>
+        <div class="stat-info"><div class="label">Usuários ativos</div><div class="value">{{ active_users }}</div></div>
+    </div>
+    <div class="glass-card stat-card">
+        <div class="stat-icon emerald"><i class="fa-solid fa-plug"></i></div>
+        <div class="stat-info"><div class="label">Requisições (API / total)</div><div class="value">{{ requests_api }} / {{ requests_total }}</div></div>
+    </div>
+</div>
+
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem;"><i class="fa-solid fa-ranking-star" style="color: var(--amber);"></i> Ranking de blockchains por gasto</h3>
+    {% if top_chain %}
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Onde os usuários mais gastaram: <strong style="color: var(--amber);">{{ top_chain.blockchain }}</strong>
+        (US$ {{ top_chain.cost|floatformat:4 }}, {{ top_chain.txs }} transaç{{ top_chain.txs|pluralize:"ão,ões" }}).
+    </p>
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead>
+                <tr><th>#</th><th>Blockchain</th><th>Gasto (USD)</th><th></th><th>Gasto (nativo)</th><th>Transações</th><th>Volume (bytes)</th><th>Operações</th><th>Usuários</th></tr>
+            </thead>
+            <tbody>
+                {% for c in chains %}
+                <tr>
+                    <td>{{ c.rank }}</td>
+                    <td><span class="badge-tag indigo">{{ c.blockchain }}</span></td>
+                    <td><strong>US$ {{ c.cost|floatformat:4 }}</strong></td>
+                    <td style="min-width: 120px;"><div style="background: rgba(255,255,255,0.08); border-radius: 4px; height: 8px;"><div style="width: {{ c.bar }}%; height: 8px; border-radius: 4px; background: var(--amber);"></div></div></td>
+                    <td>{% if c.native %}{{ c.native|floatformat:8 }} {{ c.symbol }}{% else %}sem taxa{% endif %}</td>
+                    <td>{{ c.txs }}</td>
+                    <td>{{ c.volume }}</td>
+                    <td>{{ c.ops }}</td>
+                    <td>{{ c.users }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p style="color: var(--text-dim); font-size: 0.8rem; margin-top: 0.75rem;">Custos estimados no momento do envio com os parâmetros padrão (equivalente na mainnet). Redes sem taxa aparecem com gasto zero e são desempatadas por transações.</p>
+    {% else %}
+    <p style="color: var(--text-dim); padding: 1rem 0;">Nenhuma operação de gravação ou migração registrada neste período.</p>
+    {% endif %}
+</div>
+
+{% if top_users %}
+<div class="glass-card">
+    <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-user-group" style="color: var(--cyan);"></i> Usuários que mais gastaram</h3>
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>#</th><th>Usuário</th><th>Gasto (USD)</th><th>Transações</th><th>Operações</th></tr></thead>
+            <tbody>
+                {% for u in top_users %}
+                <tr><td>{{ forloop.counter }}</td><td>{{ u.user__username }}</td><td>US$ {{ u.cost|floatformat:4 }}</td><td>{{ u.txs }}</td><td>{{ u.ops }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

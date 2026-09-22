@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block page_title %}Explorador de Ledes & Histórico de Transações{% endblock %}
+{% block page_title %}Explorador de Ledger & Histórico de Transações{% endblock %}
 {% block page_subtitle %}Visualização global de todas as transações gravadas nas blockchains suportadas pelo Bifröst{% endblock %}
 
 {% block content %}
@@ -34,7 +34,7 @@
                         <span class="badge-tag indigo">{{ tx.blockchain_name }}</span>
                     </td>
                     <td>
-                        {% if tx.salt %}
+                        {% if tx.encrypted %}
                         <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-lock"></i> Criptografado</span>
                         {% else %}
                         <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Texto Puro</span>

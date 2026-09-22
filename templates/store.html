@@ -28,8 +28,8 @@
         </div>
 
         <div class="form-group">
-            <label class="form-label" for="password"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Senha de Criptografia no Cliente (Opcional):</label>
-            <input type="password" name="password" id="password" class="form-input" placeholder="Se fornecida, o dado será criptografado com PBKDF2/Salt antes de ser enviado à blockchain">
+            <label class="form-label" for="password"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Senha de Criptografia (Opcional, aplicada no servidor):</label>
+            <input type="password" name="password" id="password" class="form-input" placeholder="Se fornecida, o servidor cifra o dado (Fernet + PBKDF2) antes de gravá-lo">
         </div>
 
         <div class="toggle-group">
@@ -44,7 +44,9 @@
             </label>
         </div>
 
-        <button type="submit" class="btn-submit">
+
+        <div id="cost-panel" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;" aria-live="polite"></div>
+        <button type="submit" class="btn-submit" id="submit-btn">
             <i class="fa-solid fa-paper-plane"></i> Enviar e Gravar na Blockchain
         </button>
     </form>
@@ -59,6 +61,11 @@
     <div style="background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.9rem;">
         <p style="margin-bottom: 0.5rem;"><strong>Blockchain Alvo:</strong> <span class="badge-tag indigo">{{ success_result.blockchain }}</span></p>
         <p style="margin-bottom: 0.5rem;"><strong>Total de Hashes Gerados:</strong> {{ success_result.count }}</p>
+        {% if success_result.cost %}
+        <p style="margin-bottom: 1rem;"><strong>Custo estimado (equivalente na mainnet):</strong>
+            {% if success_result.cost.fee_native %}{{ success_result.cost.fee_native|floatformat:8 }} {{ success_result.cost.symbol }} (US$ {{ success_result.cost.fee_usd|floatformat:4 }}){% else %}sem taxa por transação{% endif %}
+        </p>
+        {% endif %}
         <p style="margin-bottom: 1rem;"><strong>Proteção por Criptografia:</strong> {% if success_result.encrypted %}<span style="color: var(--emerald);">Ativa (Salt/Chave)</span>{% else %}<span style="color: var(--text-dim);">Não (Texto Puro)</span>{% endif %}</p>
 
         <strong style="display: block; margin-bottom: 0.5rem; color: var(--cyan);">Hashes de Transação (Guarde estes hashes para recuperar o dado):</strong>
@@ -76,4 +83,27 @@
     </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% load static %}
+<script src="{% static 'js/cost_preview.js' %}"></script>
+<script>
+initCostPreview({
+    url: "{% url 'preview_store_cost' %}",
+    panelId: 'cost-panel',
+    submitId: 'submit-btn',
+    idleMessage: 'Digite o conteúdo para ver o custo antes de enviar.',
+    buildBody: function (form) {
+        var payload = form.payload.value.trim();
+        if (!payload) return null;
+        return {
+            blockchain: form.blockchain.value,
+            payload: payload,
+            encrypted: form.password.value.length > 0,
+            multiple_tx: form.multiple_tx.checked,
+        };
+    },
+});
+</script>
 {% endblock %}

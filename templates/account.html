@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Minha Conta e Chave de API{% endblock %}
+{% block page_subtitle %}Acesso programático à API REST e contabilização de requisições{% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
+    <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Chave de API</h3>
+
+    {% if new_api_key %}
+    <div class="alert alert-success" style="display: block;">
+        <strong>Copie sua chave agora. Ela não será exibida novamente.</strong>
+        <div class="hash-badge" style="margin-top: 0.75rem; word-break: break-all; user-select: all;">{{ new_api_key }}</div>
+        <button type="button" class="nav-link" style="margin-top: 0.75rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer;" onclick="copyToClipboard('{{ new_api_key }}')">
+            <i class="fa-regular fa-copy"></i> Copiar
+        </button>
+    </div>
+    {% elif api_key %}
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">
+        Chave ativa: <span class="hash-badge">{{ api_key.prefix }}...</span>
+        &middot; criada em {{ api_key.created_at|date:"d/m/Y H:i" }}
+        &middot; último uso: {{ api_key.last_used_at|date:"d/m/Y H:i"|default:"nunca" }}
+    </p>
+    {% else %}
+    <p style="color: var(--text-muted); margin-bottom: 1rem;">Você ainda não tem uma chave de API.</p>
+    {% endif %}
+
+    <form method="POST" action="{% url 'generate_api_key' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn-submit" {% if api_key %}onclick="return confirm('Gerar uma nova chave invalida a atual. Continuar?');"{% endif %}>
+            <i class="fa-solid fa-rotate"></i> {% if api_key %}Gerar nova chave{% else %}Gerar chave de API{% endif %}
+        </button>
+    </form>
+
+    <pre class="hash-badge" style="display: block; margin-top: 1.25rem; white-space: pre-wrap;">curl -H "Authorization: Bearer SUA_CHAVE" \
+  {{ request.scheme }}://{{ request.get_host }}/api/transactions/</pre>
+</div>
+
+<div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
+    <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-chart-column" style="color: var(--cyan);"></i> Uso ({{ total_requests }} requisições)</h3>
+    {% if usage_by_endpoint %}
+    <table class="custom-table">
+        <thead><tr><th>Origem</th><th>Operação</th><th>Total</th></tr></thead>
+        <tbody>
+            {% for row in usage_by_endpoint %}
+            <tr>
+                <td>{% if row.source == 'api' %}API REST{% else %}Interface web{% endif %}</td>
+                <td>{{ row.endpoint }}</td>
+                <td>{{ row.total }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--text-dim);">Nenhuma requisição registrada ainda.</p>
+    {% endif %}
+</div>
+
+{% if recent_requests %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-clock-rotate-left" style="color: var(--purple, #a855f7);"></i> Últimas requisições</h3>
+    <table class="custom-table">
+        <thead><tr><th>Quando</th><th>Origem</th><th>Operação</th><th>Rede</th><th>Status</th></tr></thead>
+        <tbody>
+            {% for r in recent_requests %}
+            <tr>
+                <td>{{ r.created_at|date:"d/m/Y H:i:s" }}</td>
+                <td>{{ r.source }}</td>
+                <td>{{ r.method }} {{ r.endpoint }}</td>
+                <td>{{ r.blockchain|default:"-" }}</td>
+                <td>{{ r.status_code }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -24,7 +24,7 @@ Supported networks:
 
 - **Store** arbitrary text payloads on any supported blockchain.
 - **Automatic fragmentation** of data across multiple chained transactions if the payload exceeds the blockchain's per-transaction limit (`multiple_tx`).
-- **Client-side encryption** using PBKDF2 + SHA-256 with a random salt before data ever leaves your machine.
+- **Password encryption** performed on the server (PBKDF2-derived key with a random salt) before the payload is written to the adapter. It is not client-side encryption: the server sees the password and the plaintext.
 - **Retrieve** stored payloads by transaction hash, automatically reassembling fragmented multi-transaction data.
 - **Migrate** stored data from one blockchain to another in a single operation.
 - **REST API** endpoints for external integrations (`/api/store/`, `/api/retrieve/`, `/api/migrate/`, `/api/transactions/`).
@@ -71,9 +71,9 @@ BifrostTcc/
 │   └── explorer.html
 │
 ├── static/css/style.css      # Design system (dark mode, glassmorphism)
+├── requirements.txt          # Python dependencies
 ├── manage.py                 # Django management entry point
 ├── start_public_server.py    # 🌍 One-command public HTTPS tunnel
-└── requirements.txt          # Python dependencies
 ```
 
 ---
@@ -116,7 +116,7 @@ venv\Scripts\activate
 ### 3. Install Dependencies
 
 ```bash
-pip install django
+pip install -r requirements.txt
 ```
 
 > **Optional** — For production deployments, also install:
@@ -130,6 +130,7 @@ pip install django
 
 ```bash
 python manage.py migrate
+python manage.py create_admin   # optional: administrator account
 ```
 
 This creates the Django SQLite database (`db.sqlite3`) and auto-initializes the Bifröst transaction ledger (`bifrost_db.sqlite3`) with default credentials for all supported adapters.
@@ -196,21 +197,36 @@ Press `Ctrl+C` to stop the server and close the tunnel.
 
 ---
 
+## 👤 Accounts, API keys and accounting
+
+- Register at `/register/`; every account has its own ledger (users never see each other's transactions).
+- **Account page** (`/account/`): generate a personal API key (shown once, stored hashed) and see your request usage.
+- **Administrator**: create one with `python manage.py create_admin` (random password printed once; `--username`, `--password`, `--reset` available). The admin area `/painel-admin/` ranks blockchains by estimated spend, with totals per period, per-user ranking, transactions and volume. Django's own admin is at `/admin/`.
+- Every web and API request is logged (`RequestLog`); store/migrate operations also record transactions, bytes and estimated cost.
+
+## 🧮 Cost shown before sending
+
+The **Store** and **Migrate** forms show the estimated cost live, before anything is written: price in the network's token and in USD, number of transactions, bytes after encryption, and the cheapest alternative for that payload. The send button shows the price and is disabled when the data does not fit without fragmentation. API clients can call `POST /api/estimate/` (and `store` returns `estimated_cost`).
+
+Estimates use closed-form formulas: Ethereum gas (EIP-2028 + EIP-7623 floor), Bitcoin OP_RETURN vsize, Stellar per-operation fee, exact Fernet size overhead and fragmentation. Results are mainnet-equivalent; gas price, fee rate and token prices are reference values, not live quotes. Formulas are documented in `core_bifrost/costs.py`.
+
 ## 🌐 REST API Reference
 
-The platform exposes JSON API endpoints for external integration or testing.
+All endpoints require `Authorization: Bearer <your API key>`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/store/` | Store a payload on a blockchain |
-| `GET` | `/api/retrieve/?hash=TX_HASH` | Retrieve payload by transaction hash |
+| `GET` / `POST` | `/api/retrieve/?hash=TX_HASH` | Retrieve payload by transaction hash (password via `X-Bifrost-Password` header or POST body, never in the URL) |
 | `POST` | `/api/migrate/` | Migrate payload to another blockchain |
-| `GET` | `/api/transactions/` | List all recorded transactions |
+| `GET` | `/api/transactions/` | List your recorded transactions |
+| `POST` | `/api/estimate/` | Estimate the cost of a payload on every network before sending |
 
 ### Example: Store Data
 
 ```bash
 curl -X POST http://localhost:8000/api/store/ \
+  -H "Authorization: Bearer $BIFROST_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "payload": "Hello, Blockchain!",
@@ -232,13 +248,16 @@ curl -X POST http://localhost:8000/api/store/ \
 ### Example: Retrieve Data
 
 ```bash
-curl "http://localhost:8000/api/retrieve/?hash=a1b2c3d4e5f6...&password=mysecretpassword"
+curl -H "Authorization: Bearer $BIFROST_KEY" \
+  -H "X-Bifrost-Password: mysecretpassword" \
+  "http://localhost:8000/api/retrieve/?hash=a1b2c3d4e5f6..."
 ```
 
 ### Example: Migrate Data
 
 ```bash
 curl -X POST http://localhost:8000/api/migrate/ \
+  -H "Authorization: Bearer $BIFROST_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "source_hash": "a1b2c3d4e5f6...",
@@ -251,10 +270,10 @@ curl -X POST http://localhost:8000/api/migrate/ \
 
 ## 🔐 How Security Works
 
-1. If you provide a **password** when storing data, the payload is **encrypted on your machine** before being sent to the blockchain.
-2. Encryption uses **PBKDF2-HMAC-SHA256** with 100,000 iterations and a random **16-byte salt**.
-3. The salt is stored locally in the `bifrost_db.sqlite3` ledger alongside the transaction hash.
-4. Only someone with the **original password** can decrypt and read the data.
+1. If you provide a **password** when storing data, the payload is **encrypted on the server** before being written to the blockchain adapter.
+2. Encryption uses **Fernet** (AES-128-CBC + HMAC). Two keys are derived with **PBKDF2-HMAC-SHA256** (100,000 iterations, random **16-byte salt**): one to verify the password, one to encrypt.
+3. The salt and a SHA-256 password verifier are stored in the local ledger (`bifrost_db.sqlite3`); they are never returned by the API.
+4. A wrong password raises an explicit error (HTTP 403 in the API). Migration preserves the salt and verifier, so migrated data stays readable with the original password.
 
 > **Important:** The password is **never stored** anywhere. If you lose it, the data cannot be recovered.
 
@@ -272,7 +291,7 @@ curl -X POST http://localhost:8000/api/migrate/ \
 | PostgreSQL | `postgres_adapter.py` | 4096 bytes | Local Docker |
 | MultiChain | `mc_adapter.py` | 512 bytes | Local Docker |
 
-> **Note:** The platform currently runs all adapters in **simulation mode** by default. This allows full testing of the API logic (fragmentation, encryption, chaining, migration) without requiring local blockchain nodes to be running. To connect to real testnets, configure the adapter credentials in the database.
+> **Note:** All adapters currently run in **simulation mode**: payloads are kept in the local SQLite ledger (`sim_storage` table) and no real network is called. The UI marks every network as "Simulado". HYPERLEDGER and IOTA are in the enum but have no adapter yet. This allows full testing of the API logic (fragmentation, encryption, chaining, migration) without requiring local blockchain nodes to be running. To connect to real testnets, configure the adapter credentials in the database.
 
 ---
 
