@@ -25,12 +25,22 @@
     <p style="color: var(--text-muted); margin-bottom: 1rem;">Você ainda não tem uma chave de API.</p>
     {% endif %}
 
-    <form method="POST" action="{% url 'generate_api_key' %}">
-        {% csrf_token %}
-        <button type="submit" class="btn-submit" {% if api_key %}onclick="return confirm('Gerar uma nova chave invalida a atual. Continuar?');"{% endif %}>
-            <i class="fa-solid fa-rotate"></i> {% if api_key %}Gerar nova chave{% else %}Gerar chave de API{% endif %}
-        </button>
-    </form>
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <form method="POST" action="{% url 'generate_api_key' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn-submit" {% if api_key %}onclick="return confirm('Gerar uma nova chave invalida a atual. Continuar?');"{% endif %}>
+                <i class="fa-solid fa-rotate"></i> {% if api_key %}Gerar nova chave{% else %}Gerar chave de API{% endif %}
+            </button>
+        </form>
+        {% if api_key %}
+        <form method="POST" action="{% url 'revoke_api_key' %}">
+            {% csrf_token %}
+            <button type="submit" class="nav-link" style="background: rgba(244,63,94,0.12); border: none; cursor: pointer; color: var(--rose, #f43f5e);" onclick="return confirm('Revogar a chave atual? Ela para de funcionar imediatamente.');">
+                <i class="fa-solid fa-ban"></i> Revogar chave
+            </button>
+        </form>
+        {% endif %}
+    </div>
 
     <pre class="hash-badge" style="display: block; margin-top: 1.25rem; white-space: pre-wrap;">curl -H "Authorization: Bearer SUA_CHAVE" \
   {{ request.scheme }}://{{ request.get_host }}/api/transactions/</pre>

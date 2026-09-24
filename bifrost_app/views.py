@@ -25,7 +25,7 @@ from core_bifrost.custom_errors import (
     TransactionSizeError, TransactionNotFoundError, BlockchainNotFoundError, DecryptionError,
 )
 
-from .models import ApiKey, RequestLog
+from .models import ApiKey, NetworkCredential, RequestLog
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def register_view(request):
     if request.method == 'POST' and form.is_valid():
         user = form.save()
         login(request, user)
-        messages.success(request, 'Conta criada. Bem-vindo ao Bifröst!')
+        messages.success(request, 'Conta criada. Bem-vindo ao NodeConnect!')
         return redirect('dashboard')
     return render(request, 'register.html', {'form': form})
 
@@ -127,6 +127,14 @@ def generate_api_key_view(request):
     ctx = _account_context(request)
     ctx['new_api_key'] = raw_key
     return render(request, 'account.html', ctx)
+
+
+@login_required
+@require_POST
+def revoke_api_key_view(request):
+    ApiKey.objects.filter(user=request.user).delete()
+    messages.success(request, 'Chave de API revogada.')
+    return render(request, 'account.html', _account_context(request))
 
 
 # Interface web
@@ -179,6 +187,72 @@ def store_view(request):
         ctx.update(get_context_base(request, 'store'))
 
     return render(request, 'store.html', ctx)
+
+
+@login_required
+@require_POST
+def store_start_view(request):
+    """Prepara os fragmentos e devolve o total, para a barra de progresso acompanhar a gravação real (FR10)."""
+    try:
+        data = _json_body(request)
+        payload = (data.get('payload') or '').strip()
+        blockchain = data.get('blockchain', 'RBB')
+        if not payload:
+            raise ValueError('Informe o conteúdo a armazenar.')
+        job = bifrost_api.prepare_store(
+            payload, blockchain, pw=data.get('password') or None,
+            multiple_tx=bool(data.get('multiple_tx')), redundancy=bool(data.get('redundancy')),
+        )
+        request.session['store_job'] = job
+        request.session['store_job_meta'] = {'blockchain': blockchain, 'payload_preview': payload[:80]}
+        return JsonResponse({'status': 'success', 'total': job['total']})
+    except USER_ERRORS as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    except Exception:
+        logger.exception('Falha ao iniciar store incremental')
+        return JsonResponse({'status': 'error', 'message': 'Não foi possível iniciar a operação.'}, status=500)
+
+
+@login_required
+@require_POST
+def store_step_view(request):
+    """Grava um único fragmento do job em andamento e informa o progresso."""
+    job = request.session.get('store_job')
+    if not job:
+        return JsonResponse({'status': 'error', 'message': 'Nenhuma operação em andamento. Recarregue e tente novamente.'}, status=400)
+
+    try:
+        job, finished, hashes = bifrost_api.run_store_step(job, owner=request.user.pk)
+    except Exception:
+        request.session.pop('store_job', None)
+        request.session.pop('store_job_meta', None)
+        logger.exception('Falha ao gravar fragmento')
+        return JsonResponse({'status': 'error', 'message': 'Falha ao gravar um fragmento. Tente novamente.'}, status=500)
+
+    progress = sum(len(c['done']) for c in job['chains'])
+
+    if not finished:
+        request.session['store_job'] = job
+        return JsonResponse({
+            'status': 'success', 'done': False, 'progress': progress, 'total': job['total'],
+            'blockchain': job['chains'][job['chain_idx']]['blockchain'],
+        })
+
+    meta = request.session.pop('store_job_meta', {})
+    request.session.pop('store_job', None)
+    blockchain_code = meta.get('blockchain', '')
+    cost = None
+    try:
+        cost = bifrost_costs.estimate(blockchain_code, size_bytes=job['raw_bytes'], encrypted=job['encrypted'], multiple_tx=True)
+    except Exception:
+        logger.exception('Falha ao estimar custo')
+    _log_request(request.user, 'web', 'store', 'POST', 200, blockchain_code, cost)
+
+    return JsonResponse({
+        'status': 'success', 'done': True, 'progress': progress, 'total': job['total'],
+        'hashes': hashes, 'blockchain': blockchain_code, 'payload_preview': meta.get('payload_preview', ''),
+        'encrypted': job['encrypted'], 'count': len(hashes), 'cost': _cost_summary(cost),
+    })
 
 
 @login_required
@@ -248,8 +322,164 @@ def migrate_view(request):
 
 
 @login_required
+@require_POST
+def migrate_start_view(request):
+    """Recupera o payload de origem e prepara os fragmentos de destino, para a barra de progresso
+    acompanhar a migração real (FR10)."""
+    try:
+        data = _json_body(request)
+        source_hash = (data.get('source_hash') or '').strip()
+        target = data.get('target_blockchain', 'ETHEREUM')
+        if not source_hash:
+            raise ValueError('Forneça o Hash de transação de origem.')
+        job = bifrost_api.prepare_migrate(
+            source_hash, target, multiple_tx=bool(data.get('multiple_tx')), owner=request.user.pk,
+        )
+        request.session['migrate_job'] = job
+        return JsonResponse({'status': 'success', 'total': job['total']})
+    except TransactionNotFoundError as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=404)
+    except USER_ERRORS as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=400)
+    except Exception:
+        logger.exception('Falha ao iniciar migrate incremental')
+        return JsonResponse({'status': 'error', 'message': 'Não foi possível iniciar a migração.'}, status=500)
+
+
+@login_required
+@require_POST
+def migrate_step_view(request):
+    """Grava um único fragmento da migração em andamento e informa o progresso."""
+    job = request.session.get('migrate_job')
+    if not job:
+        return JsonResponse({'status': 'error', 'message': 'Nenhuma operação em andamento. Recarregue e tente novamente.'}, status=400)
+
+    try:
+        job, finished, hashes = bifrost_api.run_store_step(job, owner=request.user.pk)
+    except Exception:
+        request.session.pop('migrate_job', None)
+        logger.exception('Falha ao gravar fragmento de migração')
+        return JsonResponse({'status': 'error', 'message': 'Falha ao gravar um fragmento. Tente novamente.'}, status=500)
+
+    progress = sum(len(c['done']) for c in job['chains'])
+
+    if not finished:
+        request.session['migrate_job'] = job
+        return JsonResponse({'status': 'success', 'done': False, 'progress': progress, 'total': job['total']})
+
+    request.session.pop('migrate_job', None)
+    target_blockchain = job['chains'][0]['blockchain']
+    cost = None
+    try:
+        cost = bifrost_costs.estimate(target_blockchain, size_bytes=job['raw_bytes'], encrypted=False, multiple_tx=True)
+    except Exception:
+        logger.exception('Falha ao estimar custo')
+    _log_request(request.user, 'web', 'migrate', 'POST', 200, target_blockchain, cost)
+
+    return JsonResponse({
+        'status': 'success', 'done': True, 'progress': progress, 'total': job['total'],
+        'new_hashes': hashes, 'source_hash': job['source_hash'], 'source_blockchain': job['source_blockchain'],
+        'target_blockchain': target_blockchain, 'payload_migrated': job['payload'],
+    })
+
+
+@login_required
 def explorer_view(request):
     return render(request, 'explorer.html', get_context_base(request, 'explorer'))
+
+
+@login_required
+def billing_view(request):
+    """Histórico consolidado de custo simulado do próprio usuário, filtrável por blockchain e período (UC10/FR17)."""
+    period = request.GET.get('period', '30')
+    if period not in PERIODS:
+        period = '30'
+    blockchain = request.GET.get('blockchain', '').strip().upper()
+    if blockchain not in VALID_BLOCKCHAIN_CODES:
+        blockchain = ''
+
+    logs = request.user.request_logs.all()
+    if PERIODS[period]:
+        logs = logs.filter(created_at__gte=timezone.now() - datetime.timedelta(days=PERIODS[period]))
+    spending = logs.filter(endpoint__in=('store', 'migrate'), status_code=200).exclude(blockchain='')
+    if blockchain:
+        spending = spending.filter(blockchain=blockchain)
+
+    chains = list(
+        spending.values('blockchain').annotate(
+            cost=Sum('cost_usd'), txs=Sum('tx_count'), volume=Sum('bytes_stored'),
+            native=Sum('fee_native'), ops=Count('id'),
+        ).order_by('-cost')
+    )
+    top_cost = max((c['cost'] or 0 for c in chains), default=0)
+    for row in chains:
+        row['symbol'] = bifrost_costs.symbol_for(row['blockchain'])
+        row['bar'] = round(100 * (row['cost'] or 0) / top_cost) if top_cost else 0
+
+    totals = spending.aggregate(cost=Sum('cost_usd'), txs=Sum('tx_count'), volume=Sum('bytes_stored'))
+    ctx = get_context_base(request, 'billing')
+    ctx.update({
+        'chains': chains,
+        'totals': totals,
+        'operations': spending.order_by('-created_at')[:30],
+        'period': period,
+        'blockchain': blockchain,
+        'periods': [('7', '7 dias'), ('30', '30 dias'), ('90', '90 dias'), ('all', 'Tudo')],
+    })
+    return render(request, 'billing.html', ctx)
+
+
+# Carteira (Wallet) — credenciais de acesso por rede, UC05/FR11
+
+VALID_BLOCKCHAIN_CODES = {b['code'] for b in BLOCKCHAIN_METADATA}
+
+
+@login_required
+def wallet_view(request):
+    ctx = get_context_base(request, 'wallet')
+
+    if request.method == 'POST':
+        blockchain = request.POST.get('blockchain', '').strip().upper()
+        label = request.POST.get('label', '').strip()
+        external_id = request.POST.get('external_id', '').strip()
+
+        if blockchain not in VALID_BLOCKCHAIN_CODES:
+            messages.error(request, 'Selecione uma blockchain suportada.')
+        elif not label:
+            messages.error(request, 'Informe um rótulo para a credencial.')
+        else:
+            NetworkCredential.objects.create(
+                user=request.user, blockchain=blockchain, label=label, external_id=external_id,
+            )
+            messages.success(request, 'Credencial adicionada.')
+            return redirect('wallet')
+
+    ctx['credentials'] = request.user.network_credentials.all()
+    return render(request, 'wallet.html', ctx)
+
+
+@login_required
+@require_POST
+def wallet_credential_rename(request, pk):
+    credential = request.user.network_credentials.filter(pk=pk).first()
+    label = request.POST.get('label', '').strip()
+    if credential and label:
+        credential.label = label
+        credential.external_id = request.POST.get('external_id', '').strip()
+        credential.save(update_fields=['label', 'external_id'])
+        messages.success(request, 'Credencial atualizada.')
+    else:
+        messages.error(request, 'Não foi possível atualizar a credencial.')
+    return redirect('wallet')
+
+
+@login_required
+@require_POST
+def wallet_credential_delete(request, pk):
+    deleted, _ = request.user.network_credentials.filter(pk=pk).delete()
+    if deleted:
+        messages.success(request, 'Credencial removida.')
+    return redirect('wallet')
 
 
 # API REST (autenticada por chave: Authorization: Bearer <chave>)

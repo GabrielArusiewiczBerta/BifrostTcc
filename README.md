@@ -1,4 +1,4 @@
-# Bifröst — Multi-Chain Blockchain Interoperability API
+# NodeConnect — Multi-Chain Blockchain Interoperability Platform
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" />
@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/License-Academic-lightgrey" />
 </p>
 
-A **Django-based web platform** that provides a unified, modular API for storing, retrieving, and migrating data across multiple blockchain networks — based on the **Bifröst Notary Scheme architecture** (Scheid et al., IEEE LCN 2019).
+**NodeConnect** is a Django-based web platform that provides a unified, modular API for storing, retrieving, and migrating data across multiple blockchain networks — built on the **Bifröst Notary Scheme architecture** (Scheid et al., IEEE LCN 2019).
 
 Supported networks:
 - 🟡 **Bitcoin** (OP_RETURN, 80-byte limit)
@@ -179,7 +179,7 @@ The script will:
 
 ```
 =================================================================
- 🎉 SERVIDOR BIFRÖST PUBLICADO NA INTERNET COM SUCESSO!
+ 🎉 SERVIDOR NODECONNECT PUBLICADO NA INTERNET COM SUCESSO!
 =================================================================
 
  🌐 LINK PÚBLICO (Acessível de qualquer computador/rede):

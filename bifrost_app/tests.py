@@ -11,7 +11,7 @@ from django.utils import timezone
 import core_bifrost.api as api
 import core_bifrost.costs as costs
 from cryptography.fernet import Fernet
-from bifrost_app.models import ApiKey, RequestLog
+from bifrost_app.models import ApiKey, NetworkCredential, RequestLog
 import core_bifrost.db_manager as db
 from core_bifrost.adapters.base_adapter import split_by_bytes
 from core_bifrost.blockchain import Blockchain
@@ -440,3 +440,251 @@ class CalculatorAndAdminTests(LedgerMixin, TestCase):
             call_command('create_admin', '--username', 'chefe', stdout=StringIO())
         call_command('create_admin', '--username', 'chefe', '--reset', '--password', 'Nova-senha-123', stdout=StringIO())
         self.assertTrue(get_user_model().objects.get(username='chefe').check_password('Nova-senha-123'))
+
+
+class WalletTests(LedgerMixin, TestCase):
+    """UC05/FR11: painel de credenciais de rede (Carteira), sem chaves privadas."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.beto = User.objects.create_user('beto', password='Senha-forte-123')
+
+    def test_add_list_rename_delete_credential(self):
+        self.client.force_login(self.ana)
+        r = self.client.post('/carteira/', {'blockchain': 'ETHEREUM', 'label': 'Minha carteira', 'external_id': '0xabc'})
+        self.assertEqual(r.status_code, 302)
+        cred = NetworkCredential.objects.get(user=self.ana)
+        self.assertEqual((cred.blockchain, cred.label, cred.external_id), ('ETHEREUM', 'Minha carteira', '0xabc'))
+        self.assertContains(self.client.get('/carteira/'), 'Minha carteira')
+
+        self.client.post(f'/carteira/{cred.pk}/renomear/', {'label': 'Renomeada', 'external_id': '0xdef'})
+        cred.refresh_from_db()
+        self.assertEqual((cred.label, cred.external_id), ('Renomeada', '0xdef'))
+
+        self.client.post(f'/carteira/{cred.pk}/remover/')
+        self.assertFalse(NetworkCredential.objects.filter(pk=cred.pk).exists())
+
+    def test_invalid_blockchain_and_empty_label_are_rejected(self):
+        self.client.force_login(self.ana)
+        self.client.post('/carteira/', {'blockchain': 'XYZ', 'label': 'x'})
+        self.client.post('/carteira/', {'blockchain': 'RBB', 'label': ''})
+        self.assertEqual(NetworkCredential.objects.count(), 0)
+
+    def test_users_cannot_manage_each_others_credentials(self):
+        self.client.force_login(self.ana)
+        self.client.post('/carteira/', {'blockchain': 'RBB', 'label': 'Da Ana'})
+        cred = NetworkCredential.objects.get(user=self.ana)
+
+        intruder = Client()
+        intruder.force_login(self.beto)
+        intruder.post(f'/carteira/{cred.pk}/renomear/', {'label': 'Invadido'})
+        cred.refresh_from_db()
+        self.assertEqual(cred.label, 'Da Ana')
+
+        intruder.post(f'/carteira/{cred.pk}/remover/')
+        self.assertTrue(NetworkCredential.objects.filter(pk=cred.pk).exists())
+
+    def test_wallet_requires_login(self):
+        self.assertEqual(Client().get('/carteira/').status_code, 302)
+
+
+class BillingTests(LedgerMixin, TestCase):
+    """UC10/FR17: histórico de custo consolidado pessoal (Meu Consumo)."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.beto = User.objects.create_user('beto', password='Senha-forte-123')
+
+    def store_as(self, user, payload, chain, **extra):
+        c = Client()
+        c.force_login(user)
+        return c.post('/store/', {'payload': payload, 'blockchain': chain, **extra})
+
+    def test_billing_shows_only_own_operations(self):
+        self.store_as(self.ana, 'x' * 70, 'BITCOIN')
+        self.store_as(self.beto, 'y' * 70, 'ETHEREUM')
+        self.client.force_login(self.ana)
+        chains = [c['blockchain'] for c in self.client.get('/consumo/').context['chains']]
+        self.assertEqual(chains, ['BITCOIN'])
+
+    def test_billing_filters_by_blockchain(self):
+        self.store_as(self.ana, 'x' * 70, 'BITCOIN')
+        self.store_as(self.ana, 'y' * 70, 'ETHEREUM')
+        self.client.force_login(self.ana)
+        chains = [c['blockchain'] for c in self.client.get('/consumo/', {'blockchain': 'ETHEREUM'}).context['chains']]
+        self.assertEqual(chains, ['ETHEREUM'])
+
+    def test_billing_filters_by_period(self):
+        self.store_as(self.ana, 'x' * 70, 'BITCOIN')
+        RequestLog.objects.update(created_at=timezone.now() - datetime.timedelta(days=60))
+        self.client.force_login(self.ana)
+        self.assertEqual(self.client.get('/consumo/', {'period': '30'}).context['chains'], [])
+        self.assertEqual(len(self.client.get('/consumo/', {'period': 'all'}).context['chains']), 1)
+
+    def test_billing_totals_match_admin_totals_for_same_user(self):
+        self.store_as(self.ana, 'x' * 70, 'BITCOIN')
+        self.client.force_login(self.ana)
+        mine = self.client.get('/consumo/').context['totals']['cost']
+        self.assertAlmostEqual(mine, costs.estimate('BITCOIN', payload='x' * 70)['fee_usd'])
+
+    def test_billing_requires_login(self):
+        self.assertEqual(Client().get('/consumo/').status_code, 302)
+
+
+class ApiKeyRevokeTests(LedgerMixin, TestCase):
+    """UC06: revogar chave de API, além de gerar uma nova."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+
+    def test_revoke_deletes_key_and_blocks_api_access(self):
+        c = Client()
+        c.force_login(self.ana)
+        key = c.post('/account/api-key/').context['new_api_key']
+        self.assertEqual(c.get('/api/transactions/', HTTP_AUTHORIZATION=f'Bearer {key}').status_code, 200)
+
+        c.post('/account/api-key/revogar/')
+        self.assertFalse(ApiKey.objects.filter(user=self.ana).exists())
+        self.assertEqual(Client().get('/api/transactions/', HTTP_AUTHORIZATION=f'Bearer {key}').status_code, 401)
+
+    def test_revoke_without_key_is_harmless(self):
+        self.client.force_login(self.ana)
+        self.assertEqual(self.client.post('/account/api-key/revogar/').status_code, 200)
+
+
+class IncrementalStoreTests(LedgerMixin, TestCase):
+    """FR10: progresso real fragmento a fragmento para o Store (/store/iniciar/, /store/passo/)."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.beto = User.objects.create_user('beto', password='Senha-forte-123')
+        self.client.force_login(self.ana)
+
+    def start(self, body):
+        return self.client.post('/store/iniciar/', data=json.dumps(body), content_type='application/json')
+
+    def step(self):
+        return self.client.post('/store/passo/')
+
+    def run_full(self, body):
+        total = self.start(body).json()['total']
+        last = None
+        for _ in range(total):
+            last = self.step()
+        return last
+
+    def test_single_fragment_matches_sync_result(self):
+        data = self.run_full({'blockchain': 'RBB', 'payload': 'olá mundo'}).json()
+        self.assertTrue(data['done'])
+        self.assertEqual(data['count'], 1)
+        self.assertEqual(api.retrieve(data['hashes'][0])['payload'], 'olá mundo')
+
+    def test_multi_fragment_reports_progress_and_reassembles(self):
+        text = 'x' * 100
+        total = self.start({'blockchain': 'STELLAR', 'payload': text, 'multiple_tx': True}).json()['total']
+        self.assertGreater(total, 1)
+        for i in range(total - 1):
+            r = self.step().json()
+            self.assertFalse(r['done'])
+            self.assertEqual(r['progress'], i + 1)
+        data = self.step().json()
+        self.assertTrue(data['done'])
+        self.assertEqual(data['count'], total)
+        self.assertEqual(api.retrieve(data['hashes'][0])['payload'], text)
+
+    def test_encrypted_store_is_decryptable(self):
+        data = self.run_full({'blockchain': 'RBB', 'payload': 'segredo', 'password': 'pw'}).json()
+        self.assertTrue(data['encrypted'])
+        self.assertEqual(api.retrieve(data['hashes'][0], pw='pw')['payload'], 'segredo')
+
+    def test_redundancy_creates_postgres_copy(self):
+        data = self.run_full({'blockchain': 'RBB', 'payload': 'espelho', 'redundancy': True}).json()
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(api.retrieve(data['hashes'][1])['blockchain'], 'POSTGRES')
+
+    def test_oversized_without_multiple_tx_returns_error(self):
+        self.assertEqual(self.start({'blockchain': 'STELLAR', 'payload': 'x' * 100}).status_code, 400)
+
+    def test_empty_payload_returns_error(self):
+        self.assertEqual(self.start({'blockchain': 'RBB', 'payload': ''}).status_code, 400)
+
+    def test_step_without_start_is_error(self):
+        self.assertEqual(self.step().status_code, 400)
+
+    def test_completed_operation_is_accounted(self):
+        self.run_full({'blockchain': 'ETHEREUM', 'payload': 'x' * 60})
+        log = RequestLog.objects.get(user=self.ana, endpoint='store', source='web')
+        self.assertEqual(log.status_code, 200)
+        self.assertEqual(log.blockchain, 'ETHEREUM')
+
+    def test_job_does_not_leak_to_other_sessions(self):
+        self.start({'blockchain': 'RBB', 'payload': 'a'})
+        other = Client()
+        other.force_login(self.beto)
+        self.assertEqual(other.post('/store/passo/').status_code, 400)
+
+
+class IncrementalMigrateTests(LedgerMixin, TestCase):
+    """FR10: progresso real fragmento a fragmento para o Migrate (/migrate/iniciar/, /migrate/passo/)."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.beto = User.objects.create_user('beto', password='Senha-forte-123')
+        self.client.force_login(self.ana)
+
+    def start(self, body):
+        return self.client.post('/migrate/iniciar/', data=json.dumps(body), content_type='application/json')
+
+    def step(self):
+        return self.client.post('/migrate/passo/')
+
+    def run_full(self, body):
+        total = self.start(body).json()['total']
+        last = None
+        for _ in range(total):
+            last = self.step()
+        return last
+
+    def test_migrate_preserves_encryption(self):
+        src = api.store('dado cifrado', 'RBB', pw='abc', owner=self.ana.pk)[0]
+        data = self.run_full({'source_hash': src, 'target_blockchain': 'ETHEREUM'}).json()
+        self.assertTrue(data['done'])
+        self.assertEqual(api.retrieve(data['new_hashes'][0], pw='abc')['payload'], 'dado cifrado')
+
+    def test_migrate_fragments_when_needed(self):
+        src = api.store('a' * 200, 'RBB', owner=self.ana.pk)[0]
+        total = self.start({'source_hash': src, 'target_blockchain': 'STELLAR', 'multiple_tx': True}).json()['total']
+        self.assertGreater(total, 1)
+        data = None
+        for _ in range(total):
+            data = self.step().json()
+        self.assertEqual(len(data['new_hashes']), total)
+        self.assertEqual(api.retrieve(data['new_hashes'][0])['payload'], 'a' * 200)
+
+    def test_migrate_owner_isolation(self):
+        src = api.store('privado', 'RBB', owner=self.beto.pk)[0]
+        self.assertEqual(self.start({'source_hash': src, 'target_blockchain': 'ETHEREUM'}).status_code, 404)
+
+    def test_migrate_without_multiple_tx_returns_error(self):
+        src = api.store('a' * 200, 'RBB', owner=self.ana.pk)[0]
+        self.assertEqual(self.start({'source_hash': src, 'target_blockchain': 'STELLAR'}).status_code, 400)
+
+    def test_missing_source_hash_returns_error(self):
+        self.assertEqual(self.start({'source_hash': '', 'target_blockchain': 'ETHEREUM'}).status_code, 400)
+
+    def test_migrate_is_accounted(self):
+        src = api.store('x' * 60, 'RBB', owner=self.ana.pk)[0]
+        self.run_full({'source_hash': src, 'target_blockchain': 'ETHEREUM'})
+        log = RequestLog.objects.get(user=self.ana, endpoint='migrate', source='web')
+        self.assertEqual(log.status_code, 200)
+        self.assertEqual(log.blockchain, 'ETHEREUM')

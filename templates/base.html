@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Bifröst Blockchain Interoperability API{% endblock %}</title>
+    <title>{% block title %}NodeConnect — Interoperabilidade Blockchain{% endblock %}</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,7 +25,7 @@
                 <i class="fa-solid fa-cube"></i>
             </div>
             <div class="brand-text">
-                <h1>Bifröst API</h1>
+                <h1>NodeConnect</h1>
             </div>
         </div>
 
@@ -58,6 +58,18 @@
                 <a href="{% url 'explorer' %}" class="nav-link {% if active_tab == 'explorer' %}active{% endif %}">
                     <i class="fa-solid fa-list-check"></i>
                     <span>Explorador de Ledger</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'wallet' %}" class="nav-link {% if active_tab == 'wallet' %}active{% endif %}">
+                    <i class="fa-solid fa-wallet"></i>
+                    <span>Carteira</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'billing' %}" class="nav-link {% if active_tab == 'billing' %}active{% endif %}">
+                    <i class="fa-solid fa-receipt"></i>
+                    <span>Meu Consumo</span>
                 </a>
             </li>
             {% if user.is_staff %}

@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block page_title %}Painel Principal - Visão Geral do Bifröst{% endblock %}
+{% block page_title %}Painel Principal - Visão Geral do NodeConnect{% endblock %}
 {% block page_subtitle %}Adaptadores disponíveis e ledger de transações (redes simuladas){% endblock %}
 
 {% block content %}
@@ -23,16 +23,6 @@
         <div class="stat-info">
             <div class="label">Total de Transações</div>
             <div class="value">{{ total_transactions }}</div>
-        </div>
-    </div>
-
-    <div class="glass-card stat-card">
-        <div class="stat-icon emerald">
-            <i class="fa-solid fa-shield-halved"></i>
-        </div>
-        <div class="stat-info">
-            <div class="label">Segurança</div>
-            <div class="value">Cifra por senha (servidor)</div>
         </div>
     </div>
 

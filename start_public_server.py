@@ -41,7 +41,7 @@ def drain(stream):
 def start_servers():
     setup_cloudflared()
 
-    print("\n🚀 1. Iniciando o servidor web Django Bifröst...")
+    print("\n🚀 1. Iniciando o servidor web Django NodeConnect...")
     # 0.0.0.0 aceita conexoes de outras maquinas (rede local) alem do tunel.
     # A saida do Django vai direto para este terminal (sem PIPE), para o
     # servidor nao travar quando o buffer do pipe encher.
@@ -89,7 +89,7 @@ def start_servers():
     lan_ip = get_lan_ip()
 
     print("\n" + "=" * 65)
-    print(" 🎉 SERVIDOR BIFRÖST NO AR!" if public_url else " ⚠️  SERVIDOR LOCAL NO AR (sem link publico)")
+    print(" 🎉 SERVIDOR NODECONNECT NO AR!" if public_url else " ⚠️  SERVIDOR LOCAL NO AR (sem link publico)")
     print("=" * 65)
     if public_url:
         print(f"\n 🌐 LINK PÚBLICO (Acessível de qualquer computador/rede):")

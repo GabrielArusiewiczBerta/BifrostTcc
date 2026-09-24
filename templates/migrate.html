@@ -36,11 +36,14 @@
 
 
         <div id="cost-panel" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;" aria-live="polite"></div>
+        <div id="progress-panel" style="display: none; background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;" aria-live="polite"></div>
         <button type="submit" class="btn-submit" id="submit-btn">
             <i class="fa-solid fa-arrows-spin"></i> Executar Migração Cross-Chain
         </button>
     </form>
 </div>
+
+<div id="js-result"></div>
 
 {% if migration_result %}
 <div class="glass-card" style="max-width: 850px; margin: 2rem auto 0 auto; border-color: rgba(99, 102, 241, 0.4);">
@@ -75,6 +78,7 @@
 {% block scripts %}
 {% load static %}
 <script src="{% static 'js/cost_preview.js' %}"></script>
+<script src="{% static 'js/progress_flow.js' %}"></script>
 <script>
 initCostPreview({
     url: "{% url 'preview_migrate_cost' %}",
@@ -89,6 +93,75 @@ initCostPreview({
             target_blockchain: form.target_blockchain.value,
             multiple_tx: form.multiple_tx.checked,
         };
+    },
+});
+
+initProgressFlow({
+    submitId: 'submit-btn',
+    progressId: 'progress-panel',
+    resultId: 'js-result',
+    startUrl: "{% url 'migrate_start' %}",
+    stepUrl: "{% url 'migrate_step' %}",
+    buildStartBody: function (form) {
+        var hash = form.source_hash.value.trim();
+        if (!hash) return null;
+        return {
+            source_hash: hash,
+            target_blockchain: form.target_blockchain.value,
+            multiple_tx: form.multiple_tx.checked,
+        };
+    },
+    stepLabel: function (d) {
+        return d.total <= 1 ? 'Migrando para a blockchain de destino...' : 'Migrando fragmento ' + d.progress + ' de ' + d.total + '...';
+    },
+    renderResult: function (d) {
+        var el = progressFlowHelpers.el;
+        var card = el('div', null, 'max-width: 850px; margin: 2rem auto 0 auto; border: 1px solid rgba(99, 102, 241, 0.4); border-radius: var(--radius-lg, 16px); padding: 1.5rem; background: var(--glass-bg, rgba(255,255,255,0.03));');
+        var title = el('h3', null, 'color: var(--primary); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.75rem;');
+        title.appendChild(el('i', null, null, 'fa-solid fa-circle-check'));
+        title.appendChild(document.createTextNode('Relatório de Migração Concluída'));
+        card.appendChild(title);
+
+        var body = el('div', null, 'background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md, 8px); font-size: 0.95rem;');
+
+        var pSource = el('p', null, 'margin-bottom: 0.5rem;');
+        pSource.appendChild(el('strong', 'Blockchain de Origem: '));
+        pSource.appendChild(el('span', d.source_blockchain, null, 'badge-tag amber'));
+        body.appendChild(pSource);
+
+        var pTarget = el('p', null, 'margin-bottom: 0.5rem;');
+        pTarget.appendChild(el('strong', 'Blockchain de Destino: '));
+        pTarget.appendChild(el('span', d.target_blockchain, null, 'badge-tag emerald'));
+        body.appendChild(pTarget);
+
+        var pHash = el('p', null, 'margin-bottom: 1rem;');
+        pHash.appendChild(el('strong', 'Hash de Origem: '));
+        pHash.appendChild(el('span', d.source_hash, null, 'hash-badge'));
+        body.appendChild(pHash);
+
+        body.appendChild(el('strong', 'Novos Hashes Gerados na Blockchain de Destino:', 'display: block; margin-bottom: 0.5rem; color: var(--cyan);'));
+
+        d.new_hashes.forEach(function (h) {
+            var row = el('div', null, 'display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;');
+            row.appendChild(el('span', h, 'flex: 1;', 'hash-badge'));
+
+            var copyBtn = el('button', null, 'background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;');
+            copyBtn.type = 'button';
+            copyBtn.appendChild(el('i', null, null, 'fa-regular fa-copy'));
+            copyBtn.appendChild(document.createTextNode(' Copiar'));
+            copyBtn.addEventListener('click', function () { copyToClipboard(h); });
+            row.appendChild(copyBtn);
+
+            body.appendChild(row);
+        });
+
+        var payloadBlock = el('div', null, 'margin-top: 1rem;');
+        payloadBlock.appendChild(el('strong', 'Payload Migrado:', 'display: block; margin-bottom: 0.4rem; color: var(--text-muted);'));
+        payloadBlock.appendChild(el('div', d.payload_migrated, 'background: rgba(15, 23, 42, 0.9); padding: 1rem; border-radius: 6px; font-family: monospace;'));
+        body.appendChild(payloadBlock);
+
+        card.appendChild(body);
+        return card;
     },
 });
 </script>
