@@ -535,6 +535,182 @@ class BillingTests(LedgerMixin, TestCase):
         self.assertEqual(Client().get('/consumo/').status_code, 302)
 
 
+class InvoicingTests(LedgerMixin, TestCase):
+    """Fatura mensal simulada com boleto fictício (trabalho acadêmico, sem valor fiscal real)."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.beto = User.objects.create_user('beto', password='Senha-forte-123')
+        self.now = timezone.now()
+        RequestLog.objects.create(
+            user=self.ana, source='web', endpoint='store', method='POST', status_code=200,
+            blockchain='STELLAR', tx_hash='a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9',
+            tx_count=1, bytes_stored=20, fee_native=0.00001, cost_usd=1.5,
+        )
+        RequestLog.objects.create(
+            user=self.ana, source='api', endpoint='store', method='POST', status_code=200,
+            blockchain='BITCOIN', tx_hash='7c3ab2e93baa86bf940d1234567890abcdef1234567890abcdef1234567890',
+            tx_count=1, bytes_stored=40, fee_native=0.00002, cost_usd=3.25,
+        )
+
+    def test_generate_invoices_converts_usd_to_brl_and_sets_due_date(self):
+        from bifrost_app.invoicing import USD_TO_BRL, generate_invoices_for_period
+        from decimal import Decimal
+
+        invoices = generate_invoices_for_period(self.now.year, self.now.month)
+        self.assertEqual(len(invoices), 1)
+        invoice = invoices[0]
+        self.assertEqual(invoice.user, self.ana)
+        self.assertEqual(invoice.amount_brl, (Decimal('4.75') * USD_TO_BRL).quantize(Decimal('0.01')))
+        self.assertGreater(invoice.due_date, self.now.date())
+        self.assertTrue(invoice.boleto_number)
+        self.assertTrue(invoice.linha_digitavel)
+
+    def test_generate_invoices_does_not_bill_the_same_operation_twice(self):
+        from bifrost_app.invoicing import generate_invoices_for_period
+        from bifrost_app.models import Invoice
+
+        first_run = generate_invoices_for_period(self.now.year, self.now.month)
+        self.assertEqual(len(first_run), 1)
+        second_run = generate_invoices_for_period(self.now.year, self.now.month)
+        self.assertEqual(second_run, [])
+        self.assertEqual(Invoice.objects.filter(user=self.ana).count(), 1)
+
+    def test_paying_in_advance_twice_bills_only_the_new_usage(self):
+        """Reproduz o bug relatado: pagar adiantado não pode travar o mês numa fatura só,
+        já quitada — uso novo depois disso precisa gerar outra fatura, só com a diferença."""
+        from bifrost_app.invoicing import generate_invoice_for_user
+        from bifrost_app.models import Invoice
+
+        first = generate_invoice_for_user(self.ana, self.now.year, self.now.month)
+        self.assertIsNotNone(first)
+        self.assertEqual(Invoice.objects.filter(user=self.ana).count(), 1)
+
+        # tentar de novo sem uso novo: nada a cobrar
+        self.assertIsNone(generate_invoice_for_user(self.ana, self.now.year, self.now.month))
+
+        # usa mais a plataforma depois de ter pago adiantado
+        RequestLog.objects.create(
+            user=self.ana, source='web', endpoint='store', method='POST', status_code=200,
+            blockchain='ETHEREUM', tx_count=1, bytes_stored=10, fee_native=0.0001, cost_usd=2.0,
+        )
+        second = generate_invoice_for_user(self.ana, self.now.year, self.now.month)
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first.pk, second.pk)
+        self.assertEqual(Invoice.objects.filter(user=self.ana).count(), 2)
+        self.assertAlmostEqual(float(second.amount_brl), 2.0 * 5.0)
+
+        # consumo (RequestLog) nunca é apagado/zerado por faturar; só fica marcado como faturado
+        self.assertEqual(RequestLog.objects.filter(user=self.ana).count(), 3)
+        self.assertEqual(RequestLog.objects.filter(user=self.ana, invoice__isnull=True).count(), 0)
+
+    def test_user_without_cost_gets_no_invoice(self):
+        from bifrost_app.invoicing import generate_invoices_for_period
+        from bifrost_app.models import Invoice
+
+        generate_invoices_for_period(self.now.year, self.now.month)
+        self.assertFalse(Invoice.objects.filter(user=self.beto).exists())
+
+    def test_boleto_view_requires_login_and_ownership(self):
+        from bifrost_app.invoicing import generate_invoices_for_period
+        from bifrost_app.models import Invoice
+
+        generate_invoices_for_period(self.now.year, self.now.month)
+        invoice = Invoice.objects.get(user=self.ana)
+
+        self.assertEqual(Client().get(f'/consumo/fatura/{invoice.pk}/').status_code, 302)
+
+        intruder = Client()
+        intruder.force_login(self.beto)
+        self.assertEqual(intruder.get(f'/consumo/fatura/{invoice.pk}/').status_code, 404)
+
+        owner = Client()
+        owner.force_login(self.ana)
+        self.assertEqual(owner.get(f'/consumo/fatura/{invoice.pk}/').status_code, 200)
+
+    def test_boleto_pdf_requires_login_and_ownership_and_is_a_valid_pdf(self):
+        from bifrost_app.invoicing import generate_invoices_for_period
+        from bifrost_app.models import Invoice
+
+        generate_invoices_for_period(self.now.year, self.now.month)
+        invoice = Invoice.objects.get(user=self.ana)
+        url = f'/consumo/fatura/{invoice.pk}/pdf/'
+
+        self.assertEqual(Client().get(url).status_code, 302)
+
+        intruder = Client()
+        intruder.force_login(self.beto)
+        self.assertEqual(intruder.get(url).status_code, 404)
+
+        owner = Client()
+        owner.force_login(self.ana)
+        response = owner.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
+        self.assertTrue(response.content.startswith(b'%PDF-'))
+
+    def test_invoice_items_lists_hash_and_amount_per_operation_and_sums_to_total(self):
+        from bifrost_app.invoicing import generate_invoices_for_period, invoice_items
+
+        invoice = generate_invoices_for_period(self.now.year, self.now.month)[0]
+        items = invoice_items(invoice)
+
+        self.assertEqual(len(items), 2)
+        hashes = {item['tx_hash'] for item in items}
+        self.assertEqual(hashes, {
+            'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9',
+            '7c3ab2e93baa86bf940d1234567890abcdef1234567890abcdef1234567890',
+        })
+        self.assertEqual(sum(item['amount_brl'] for item in items), invoice.amount_brl)
+
+    def test_mark_paid_updates_status(self):
+        from bifrost_app.invoicing import generate_invoices_for_period
+        from bifrost_app.models import Invoice
+
+        generate_invoices_for_period(self.now.year, self.now.month)
+        invoice = Invoice.objects.get(user=self.ana)
+        self.assertEqual(invoice.status, 'pendente')
+
+        c = Client()
+        c.force_login(self.ana)
+        c.post(f'/consumo/fatura/{invoice.pk}/pagar/')
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, 'pago')
+
+    def test_admin_generate_invoices_requires_staff(self):
+        c = Client()
+        c.force_login(self.ana)
+        self.assertEqual(c.post('/painel-admin/gerar-faturas/').status_code, 403)
+
+    def test_pay_advance_generates_and_pays_current_month_invoice(self):
+        from bifrost_app.models import Invoice
+
+        RequestLog.objects.create(
+            user=self.ana, source='web', endpoint='store', method='POST', status_code=200,
+            blockchain='ETHEREUM', tx_count=1, bytes_stored=10, fee_native=0.0001, cost_usd=2.0,
+            created_at=self.now,
+        )
+        c = Client()
+        c.force_login(self.ana)
+        r = c.post('/consumo/fatura/antecipar/')
+        self.assertEqual(r.status_code, 302)
+
+        invoice = Invoice.objects.get(user=self.ana, year=self.now.year, month=self.now.month)
+        self.assertEqual(invoice.status, 'pago')
+        self.assertGreater(invoice.amount_brl, 0)
+
+    def test_pay_advance_without_cost_shows_error_and_creates_nothing(self):
+        from bifrost_app.models import Invoice
+
+        c = Client()
+        c.force_login(self.beto)
+        r = c.post('/consumo/fatura/antecipar/', follow=True)
+        self.assertContains(r, 'Você ainda não tem custo registrado neste mês para antecipar.')
+        self.assertFalse(Invoice.objects.filter(user=self.beto).exists())
+
+
 class ApiKeyRevokeTests(LedgerMixin, TestCase):
     """UC06: revogar chave de API, além de gerar uma nova."""
 
@@ -688,3 +864,66 @@ class IncrementalMigrateTests(LedgerMixin, TestCase):
         log = RequestLog.objects.get(user=self.ana, endpoint='migrate', source='web')
         self.assertEqual(log.status_code, 200)
         self.assertEqual(log.blockchain, 'ETHEREUM')
+
+
+class ApiDocsTests(SimpleTestCase):
+    """Documentação interativa da API REST (Swagger UI sobre static/openapi.yaml)."""
+
+    def test_docs_page_is_public_and_loads_the_spec(self):
+        r = Client().get('/api/docs/')
+        self.assertEqual(r.status_code, 200)
+        self.assertContains(r, 'swagger-ui')
+        self.assertContains(r, "openapi.yaml")
+
+    def test_spec_file_exists_and_lists_every_endpoint(self):
+        from django.conf import settings
+        spec_path = settings.BASE_DIR / 'static' / 'openapi.yaml'
+        self.assertTrue(spec_path.exists())
+        content = spec_path.read_text(encoding='utf-8')
+        for path in ('/api/store/', '/api/retrieve/', '/api/migrate/', '/api/transactions/', '/api/estimate/'):
+            self.assertIn(path, content)
+
+
+class RealNetworksToggleTests(LedgerMixin, TestCase):
+    """BIFROST_REAL_NETWORKS liga/desliga o uso de testnets reais (Stellar, Ethereum) sem
+    exigir rede de verdade nestes testes: por padrão (variável ausente) tudo continua
+    simulado, o que os outros testes da suíte já comprovam ao usar STELLAR/ETHEREUM
+    normalmente. Aqui cobrimos só a lógica do toggle e o reflexo dela na interface."""
+
+    def setUp(self):
+        super().setUp()
+        User = get_user_model()
+        self.ana = User.objects.create_user('ana', password='Senha-forte-123')
+        self.client.force_login(self.ana)
+
+    def test_flag_parsing(self):
+        from core_bifrost.net import real_network_enabled
+        with mock.patch.dict(os.environ, {'BIFROST_REAL_NETWORKS': ''}):
+            self.assertFalse(real_network_enabled('STELLAR'))
+        with mock.patch.dict(os.environ, {'BIFROST_REAL_NETWORKS': 'STELLAR'}):
+            self.assertTrue(real_network_enabled('STELLAR'))
+            self.assertFalse(real_network_enabled('ETHEREUM'))
+        with mock.patch.dict(os.environ, {'BIFROST_REAL_NETWORKS': ' stellar , Ethereum '}):
+            self.assertTrue(real_network_enabled('STELLAR'))
+            self.assertTrue(real_network_enabled('ETHEREUM'))
+
+    def test_dashboard_reflects_which_networks_are_real(self):
+        r = self.client.get('/')
+        self.assertContains(r, 'Modo simulação')
+        stellar = next(b for b in r.context['blockchains'] if b['code'] == 'STELLAR')
+        self.assertEqual(stellar['status'], 'Simulado')
+
+        with mock.patch.dict(os.environ, {'BIFROST_REAL_NETWORKS': 'STELLAR'}):
+            r = self.client.get('/')
+        self.assertContains(r, 'Conectado a rede(s) real(is) de teste: STELLAR')
+        stellar = next(b for b in r.context['blockchains'] if b['code'] == 'STELLAR')
+        ethereum = next(b for b in r.context['blockchains'] if b['code'] == 'ETHEREUM')
+        self.assertEqual(stellar['status'], 'Real (Testnet)')
+        self.assertEqual(ethereum['status'], 'Simulado')
+
+    def test_adapters_fall_back_to_simulation_when_flag_is_off(self):
+        """Sem a flag, Stellar/Bitcoin/Ethereum se comportam como qualquer adaptador
+        simulado (garante que o código novo não quebrou o caminho padrão)."""
+        for chain in ('STELLAR', 'BITCOIN', 'ETHEREUM'):
+            hashes = api.store('sem rede real', chain)
+            self.assertEqual(api.retrieve(hashes[0])['payload'], 'sem rede real', chain)

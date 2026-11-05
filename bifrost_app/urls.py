@@ -15,6 +15,7 @@ urlpatterns = [
     path('migrate/passo/', views.migrate_step_view, name='migrate_step'),
     path('painel-admin/', views.admin_accounting_view, name='admin_accounting'),
     path('account/api-key/', views.generate_api_key_view, name='generate_api_key'),
+    path('account/api-key/renovar/', views.renew_api_key_view, name='renew_api_key'),
     path('account/api-key/revogar/', views.revoke_api_key_view, name='revoke_api_key'),
 
     path('', views.dashboard_view, name='dashboard'),
@@ -25,7 +26,14 @@ urlpatterns = [
     path('carteira/', views.wallet_view, name='wallet'),
     path('carteira/<int:pk>/renomear/', views.wallet_credential_rename, name='wallet_credential_rename'),
     path('carteira/<int:pk>/remover/', views.wallet_credential_delete, name='wallet_credential_delete'),
+    path('carteira/chave-propria/<str:blockchain>/gerar/', views.wallet_generate_key_view, name='wallet_generate_key'),
+    path('carteira/chave-propria/<str:blockchain>/remover/', views.wallet_delete_key_view, name='wallet_delete_key'),
     path('consumo/', views.billing_view, name='billing'),
+    path('consumo/fatura/<int:pk>/', views.invoice_boleto_view, name='invoice_boleto'),
+    path('consumo/fatura/<int:pk>/pdf/', views.invoice_boleto_pdf_view, name='invoice_boleto_pdf'),
+    path('consumo/fatura/<int:pk>/pagar/', views.invoice_mark_paid_view, name='invoice_mark_paid'),
+    path('consumo/fatura/antecipar/', views.invoice_pay_advance_view, name='invoice_pay_advance'),
+    path('painel-admin/gerar-faturas/', views.admin_generate_invoices_view, name='admin_generate_invoices'),
 
     # REST API endpoints
     path('api/store/', views.api_store, name='api_store'),
@@ -33,4 +41,5 @@ urlpatterns = [
     path('api/migrate/', views.api_migrate, name='api_migrate'),
     path('api/transactions/', views.api_transactions, name='api_transactions'),
     path('api/estimate/', views.api_estimate, name='api_estimate'),
+    path('api/docs/', views.api_docs_view, name='api_docs'),
 ]

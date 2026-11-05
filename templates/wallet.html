@@ -5,6 +5,52 @@
 
 {% block content %}
 <div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
+    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-key" style="color: var(--amber);"></i> Chave de Blockchain: Central ou Própria
+    </h3>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem;">
+        Por padrão, as operações nas redes reais usam uma chave central compartilhada por todos os usuários.
+        Gere uma chave própria por rede pra assinar com uma carteira só sua (ela começa sem saldo, é preciso
+        financiar numa faucet de testnet). A chave fica cifrada no servidor; não é possível exportá-la depois.
+    </p>
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>Blockchain</th><th>Chave em uso</th><th>Endereço</th><th>Ações</th></tr></thead>
+            <tbody>
+                {% for row in own_key_rows %}
+                <tr>
+                    <td><span class="badge-tag indigo">{{ row.code }}</span></td>
+                    {% if row.key %}
+                    <td><span style="color: var(--emerald, #10b981);">Própria</span></td>
+                    <td style="color: var(--text-muted); font-size: 0.8rem; word-break: break-all;">{{ row.key.public_address }}</td>
+                    <td>
+                        <form method="POST" action="{% url 'wallet_delete_key' row.code %}" onsubmit="return confirm('Remover a chave própria? Volta a usar a chave central.');">
+                            {% csrf_token %}
+                            <button type="submit" class="nav-link" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(244,63,94,0.12); border: none; cursor: pointer; color: var(--rose, #f43f5e);">
+                                <i class="fa-solid fa-trash"></i> Remover
+                            </button>
+                        </form>
+                    </td>
+                    {% else %}
+                    <td style="color: var(--text-dim);">Central (compartilhada)</td>
+                    <td style="color: var(--text-dim); font-size: 0.8rem;">-</td>
+                    <td>
+                        <form method="POST" action="{% url 'wallet_generate_key' row.code %}" onsubmit="return confirm('Gerar uma chave própria pra {{ row.code }}? Ela começa sem saldo.');">
+                            {% csrf_token %}
+                            <button type="submit" class="nav-link" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer;">
+                                <i class="fa-solid fa-plus"></i> Gerar chave própria
+                            </button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
     <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
         <i class="fa-solid fa-wallet" style="color: var(--amber);"></i> Adicionar Credencial
     </h3>

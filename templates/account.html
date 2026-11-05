@@ -20,6 +20,12 @@
         Chave ativa: <span class="hash-badge">{{ api_key.prefix }}...</span>
         &middot; criada em {{ api_key.created_at|date:"d/m/Y H:i" }}
         &middot; último uso: {{ api_key.last_used_at|date:"d/m/Y H:i"|default:"nunca" }}
+        &middot;
+        {% if api_key.is_expired %}
+        <span style="color: var(--rose, #f43f5e);">expirada em {{ api_key.expires_at|date:"d/m/Y H:i" }}</span>
+        {% else %}
+        válida até {{ api_key.expires_at|date:"d/m/Y H:i" }}
+        {% endif %}
     </p>
     {% else %}
     <p style="color: var(--text-muted); margin-bottom: 1rem;">Você ainda não tem uma chave de API.</p>
@@ -33,6 +39,12 @@
             </button>
         </form>
         {% if api_key %}
+        <form method="POST" action="{% url 'renew_api_key' %}">
+            {% csrf_token %}
+            <button type="submit" class="nav-link" style="background: rgba(255,255,255,0.1); border: none; cursor: pointer;">
+                <i class="fa-regular fa-clock"></i> Renovar validade (+1h)
+            </button>
+        </form>
         <form method="POST" action="{% url 'revoke_api_key' %}">
             {% csrf_token %}
             <button type="submit" class="nav-link" style="background: rgba(244,63,94,0.12); border: none; cursor: pointer; color: var(--rose, #f43f5e);" onclick="return confirm('Revogar a chave atual? Ela para de funcionar imediatamente.');">

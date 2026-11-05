@@ -73,7 +73,7 @@ def store(text: str, blockchain, pw: str = None, multiple_tx: bool = False, redu
         blockchain = Blockchain.from_name(blockchain)
 
     adapter = identify_blockchain(blockchain)
-    hashes, salt, key = adapter.store_wrapper(text, pw, multiple_tx)
+    hashes, salt, key = adapter.store_wrapper(text, pw, multiple_tx, owner=owner)
     _record(hashes, blockchain, salt, key, _preview(text, bool(pw)), owner)
 
     if redundancy and blockchain != Blockchain.POSTGRES:
@@ -124,7 +124,7 @@ def run_store_step(job: dict, owner=None):
     chain = job['chains'][job['chain_idx']]
     chunk = chain['chunks'][job['chunk_idx']]
     adapter = identify_blockchain(Blockchain.from_name(chain['blockchain']))
-    chain['done'].append(adapter.store_chunk(chunk))
+    chain['done'].append(adapter.store_chunk(chunk, owner=owner))
     job['chunk_idx'] += 1
 
     if job['chunk_idx'] == len(chain['chunks']):
@@ -205,7 +205,7 @@ def migrate(transaction_hash: str, target_blockchain, multiple_tx: bool = False,
     salt, key = first['salt'], first['key']
     payload = source_adapter.retrieve_wrapper([r['hash'] for r in chain])
 
-    new_hashes, _, _ = target_adapter.store_wrapper(payload, None, multiple_tx)
+    new_hashes, _, _ = target_adapter.store_wrapper(payload, None, multiple_tx, owner=owner)
     _record(new_hashes, target_blockchain, salt, key, _preview(payload, bool(salt)), owner)
 
     return {

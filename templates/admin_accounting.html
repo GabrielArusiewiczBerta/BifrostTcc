@@ -15,6 +15,16 @@
     <a href="?period={{ period }}&order=bytes" class="nav-link {% if order == 'bytes' %}active{% endif %}" style="padding: 0.4rem 0.9rem;">Volume</a>
 </div>
 
+<form method="POST" action="{% url 'admin_generate_invoices' %}" style="margin-bottom: 1.5rem;">
+    {% csrf_token %}
+    <button type="submit" class="nav-link" style="background: rgba(255,255,255,0.1); border: none; cursor: pointer;">
+        <i class="fa-solid fa-file-invoice-dollar"></i> Gerar faturas do mês agora (simulado)
+    </button>
+    <span style="color: var(--text-dim); font-size: 0.8rem; margin-left: 0.5rem;">
+        Normalmente roda sozinho via cron no início do mês (<code>manage.py gerar_faturas</code>); este botão gera na hora, pra demonstração.
+    </span>
+</form>
+
 <div class="stats-grid">
     <div class="glass-card stat-card">
         <div class="stat-icon amber"><i class="fa-solid fa-coins"></i></div>

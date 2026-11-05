@@ -11,7 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.contrib.auth.forms import UserCreationForm
 from django.db.models import Count, Sum
-from django.http import JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -20,12 +20,16 @@ from django.views.decorators.http import require_POST
 import core_bifrost.api as bifrost_api
 import core_bifrost.costs as bifrost_costs
 import core_bifrost.db_manager as bifrost_db
+import core_bifrost.net as bifrost_net
 from core_bifrost.blockchain import Blockchain
 from core_bifrost.custom_errors import (
     TransactionSizeError, TransactionNotFoundError, BlockchainNotFoundError, DecryptionError,
 )
 
-from .models import ApiKey, NetworkCredential, RequestLog
+from .context_processors import REAL_CAPABLE_NETWORKS
+from .invoicing import generate_invoice_for_user, generate_invoices_for_period, invoice_items
+from .models import ApiKey, NetworkCredential, RequestLog, UserBlockchainKey
+from .server_secrets import encrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +46,12 @@ BLOCKCHAIN_METADATA = [
 USER_ERRORS = (TransactionSizeError, BlockchainNotFoundError, ValueError)
 
 
-def _log_request(user, source, endpoint, method, status_code, blockchain='', cost=None):
+def _log_request(user, source, endpoint, method, status_code, blockchain='', cost=None, tx_hash=''):
     cost = cost or {}
     RequestLog.objects.create(
         user=user, source=source, endpoint=endpoint, method=method,
         status_code=status_code, blockchain=str(blockchain or '')[:20],
+        tx_hash=str(tx_hash or '')[:80] if status_code == 200 else '',
         tx_count=cost.get('fragments', 0) if status_code == 200 else 0,
         bytes_stored=cost.get('onchain_bytes', 0) if status_code == 200 else 0,
         fee_native=cost.get('fee_native', 0.0) if status_code == 200 else 0.0,
@@ -73,11 +78,20 @@ def staff_required(view):
     return wrapper
 
 
+def _blockchains_with_status():
+    result = []
+    for bc in BLOCKCHAIN_METADATA:
+        bc = dict(bc)
+        bc['status'] = 'Real (Testnet)' if bifrost_net.real_network_enabled(bc['code']) else 'Simulado'
+        result.append(bc)
+    return result
+
+
 def get_context_base(request, active_tab='dashboard'):
     txs = bifrost_db.get_all_transactions(owner=request.user.pk)
     return {
         'active_tab': active_tab,
-        'blockchains': BLOCKCHAIN_METADATA,
+        'blockchains': _blockchains_with_status(),
         'total_transactions': len(txs),
         'active_nodes_count': len(BLOCKCHAIN_METADATA),
         'total_requests': request.user.request_logs.count(),
@@ -122,11 +136,28 @@ def generate_api_key_view(request):
     raw_key = 'bfr_' + secrets.token_urlsafe(32)
     ApiKey.objects.update_or_create(
         user=request.user,
-        defaults={'key_hash': hashlib.sha256(raw_key.encode()).hexdigest(), 'prefix': raw_key[:12], 'last_used_at': None},
+        defaults={
+            'key_hash': hashlib.sha256(raw_key.encode()).hexdigest(),
+            'prefix': raw_key[:12],
+            'last_used_at': None,
+            'expires_at': timezone.now() + ApiKey.VALIDITY,
+        },
     )
     ctx = _account_context(request)
     ctx['new_api_key'] = raw_key
     return render(request, 'account.html', ctx)
+
+
+@login_required
+@require_POST
+def renew_api_key_view(request):
+    """Estende a validade da chave atual por mais 1h, sem trocar o valor (não expõe a chave de novo)."""
+    updated = ApiKey.objects.filter(user=request.user).update(expires_at=timezone.now() + ApiKey.VALIDITY)
+    if updated:
+        messages.success(request, 'Validade da chave renovada por mais 1 hora.')
+    else:
+        messages.error(request, 'Nenhuma chave de API para renovar.')
+    return render(request, 'account.html', _account_context(request))
 
 
 @login_required
@@ -161,6 +192,7 @@ def store_view(request):
 
         status = 200
         cost = None
+        hashes = []
         try:
             hashes = bifrost_api.store(
                 text=payload, blockchain=blockchain_code, pw=password,
@@ -183,7 +215,7 @@ def store_view(request):
             status = 500
             logger.exception('Falha em store')
             messages.error(request, 'Não foi possível armazenar os dados. Verifique a rede escolhida e tente novamente.')
-        _log_request(request.user, 'web', 'store', 'POST', status, blockchain_code, cost)
+        _log_request(request.user, 'web', 'store', 'POST', status, blockchain_code, cost, tx_hash=hashes[0] if hashes else '')
         ctx.update(get_context_base(request, 'store'))
 
     return render(request, 'store.html', ctx)
@@ -246,7 +278,7 @@ def store_step_view(request):
         cost = bifrost_costs.estimate(blockchain_code, size_bytes=job['raw_bytes'], encrypted=job['encrypted'], multiple_tx=True)
     except Exception:
         logger.exception('Falha ao estimar custo')
-    _log_request(request.user, 'web', 'store', 'POST', 200, blockchain_code, cost)
+    _log_request(request.user, 'web', 'store', 'POST', 200, blockchain_code, cost, tx_hash=hashes[0] if hashes else '')
 
     return JsonResponse({
         'status': 'success', 'done': True, 'progress': progress, 'total': job['total'],
@@ -300,6 +332,7 @@ def migrate_view(request):
 
         status = 200
         cost = None
+        result = None
         try:
             result = bifrost_api.migrate(source_hash, target_blockchain, multiple_tx=multiple_tx, owner=request.user.pk)
             cost = _estimate_or_none(target_blockchain, result['payload_migrated'], False)
@@ -315,7 +348,8 @@ def migrate_view(request):
             status = 500
             logger.exception('Falha em migrate')
             messages.error(request, 'Não foi possível migrar os dados. Verifique o hash de origem e a rede de destino.')
-        _log_request(request.user, 'web', 'migrate', 'POST', status, target_blockchain, cost)
+        tx_hash = result['new_hashes'][0] if result and result.get('new_hashes') else ''
+        _log_request(request.user, 'web', 'migrate', 'POST', status, target_blockchain, cost, tx_hash=tx_hash)
         ctx.update(get_context_base(request, 'migrate'))
 
     return render(request, 'migrate.html', ctx)
@@ -374,7 +408,7 @@ def migrate_step_view(request):
         cost = bifrost_costs.estimate(target_blockchain, size_bytes=job['raw_bytes'], encrypted=False, multiple_tx=True)
     except Exception:
         logger.exception('Falha ao estimar custo')
-    _log_request(request.user, 'web', 'migrate', 'POST', 200, target_blockchain, cost)
+    _log_request(request.user, 'web', 'migrate', 'POST', 200, target_blockchain, cost, tx_hash=hashes[0] if hashes else '')
 
     return JsonResponse({
         'status': 'success', 'done': True, 'progress': progress, 'total': job['total'],
@@ -386,6 +420,12 @@ def migrate_step_view(request):
 @login_required
 def explorer_view(request):
     return render(request, 'explorer.html', get_context_base(request, 'explorer'))
+
+
+def api_docs_view(request):
+    """Documentação interativa da API REST (Swagger UI sobre static/openapi.yaml). Pública,
+    sem exigir login, já que a API é consumida por sistemas externos (UC08)."""
+    return render(request, 'api_docs.html')
 
 
 @login_required
@@ -425,8 +465,76 @@ def billing_view(request):
         'period': period,
         'blockchain': blockchain,
         'periods': [('7', '7 dias'), ('30', '30 dias'), ('90', '90 dias'), ('all', 'Tudo')],
+        'invoices': request.user.invoices.all()[:12],
     })
     return render(request, 'billing.html', ctx)
+
+
+@login_required
+def invoice_boleto_view(request, pk):
+    invoice = request.user.invoices.filter(pk=pk).first()
+    if invoice is None:
+        raise Http404('Fatura não encontrada.')
+    return render(request, 'invoice_boleto.html', {'invoice': invoice, 'active_tab': 'billing'})
+
+
+@login_required
+def invoice_boleto_pdf_view(request, pk):
+    from io import BytesIO
+
+    from django.template.loader import render_to_string
+    from xhtml2pdf import pisa
+
+    invoice = request.user.invoices.filter(pk=pk).first()
+    if invoice is None:
+        raise Http404('Fatura não encontrada.')
+
+    html = render_to_string('invoice_boleto_pdf.html', {'invoice': invoice, 'items': invoice_items(invoice)})
+    buffer = BytesIO()
+    pisa.CreatePDF(html, dest=buffer)
+
+    response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+    response['Content-Disposition'] = f'attachment; filename="fatura_{invoice.month:02d}_{invoice.year}.pdf"'
+    return response
+
+
+@login_required
+@require_POST
+def invoice_pay_advance_view(request):
+    """Autosserviço: gera (se ainda não existir) a fatura do mês corrente com o custo
+    acumulado até agora e já marca como paga, sem esperar o início do mês seguinte."""
+    today = timezone.now()
+    invoice = generate_invoice_for_user(request.user, today.year, today.month)
+    if invoice is None:
+        messages.error(request, 'Você ainda não tem custo registrado neste mês para antecipar.')
+        return redirect('billing')
+    if invoice.status != 'pago':
+        invoice.status = 'pago'
+        invoice.save(update_fields=['status'])
+    messages.success(request, f'Fatura de {today.month:02d}/{today.year} antecipada e paga (simulado): R$ {invoice.amount_brl}.')
+    return redirect('invoice_boleto', pk=invoice.pk)
+
+
+@login_required
+@require_POST
+def invoice_mark_paid_view(request, pk):
+    invoice = request.user.invoices.filter(pk=pk).first()
+    if invoice is None:
+        raise Http404('Fatura não encontrada.')
+    invoice.status = 'pago'
+    invoice.save(update_fields=['status'])
+    messages.success(request, 'Fatura marcada como paga (simulado).')
+    return redirect('invoice_boleto', pk=pk)
+
+
+@staff_required
+@require_POST
+def admin_generate_invoices_view(request):
+    """Gera agora as faturas do mês atual, sem esperar o cron (demonstração/TCC)."""
+    today = timezone.now()
+    invoices = generate_invoices_for_period(today.year, today.month)
+    messages.success(request, f'{len(invoices)} fatura(s) gerada(s)/conferida(s) para {today.month:02d}/{today.year}.')
+    return redirect('admin_accounting')
 
 
 # Carteira (Wallet) — credenciais de acesso por rede, UC05/FR11
@@ -455,7 +563,52 @@ def wallet_view(request):
             return redirect('wallet')
 
     ctx['credentials'] = request.user.network_credentials.all()
+    own_keys = {k.blockchain: k for k in request.user.blockchain_keys.all()}
+    ctx['own_key_rows'] = [{'code': code, 'key': own_keys.get(code)} for code in REAL_CAPABLE_NETWORKS]
     return render(request, 'wallet.html', ctx)
+
+
+@login_required
+@require_POST
+def wallet_generate_key_view(request, blockchain):
+    blockchain = blockchain.upper()
+    if blockchain not in REAL_CAPABLE_NETWORKS:
+        messages.error(request, 'Essa blockchain não suporta chave própria.')
+        return redirect('wallet')
+
+    if blockchain == 'STELLAR':
+        from core_bifrost.testnet_keys import generate_stellar_keypair
+        keypair = generate_stellar_keypair()
+        public_address, raw_secret = keypair.public_key, keypair.secret
+    elif blockchain == 'BITCOIN':
+        from core_bifrost.testnet_keys import generate_btc_key
+        private_key = generate_btc_key()
+        public_address = private_key.get_public_key().get_segwit_address().to_string()
+        raw_secret = private_key.to_wif()
+    else:  # ETHEREUM
+        from core_bifrost.testnet_keys import generate_eth_account
+        account = generate_eth_account()
+        public_address, raw_secret = account.address, account.key.hex()
+
+    UserBlockchainKey.objects.update_or_create(
+        user=request.user, blockchain=blockchain,
+        defaults={'public_address': public_address, 'encrypted_secret': encrypt_secret(raw_secret)},
+    )
+    messages.success(
+        request,
+        f'Chave própria gerada para {blockchain} (endereço {public_address}). '
+        f'Lembre-se de financiá-la via faucet de testnet antes de usar — ela começa sem saldo.',
+    )
+    return redirect('wallet')
+
+
+@login_required
+@require_POST
+def wallet_delete_key_view(request, blockchain):
+    deleted, _ = request.user.blockchain_keys.filter(blockchain=blockchain.upper()).delete()
+    if deleted:
+        messages.success(request, 'Chave própria removida. Essa blockchain volta a usar a chave central.')
+    return redirect('wallet')
 
 
 @login_required
@@ -523,6 +676,11 @@ def api_endpoint(name, methods):
                     {'status': 'error', 'message': 'Chave de API ausente ou inválida. Use Authorization: Bearer <chave>.'},
                     status=401,
                 )
+            if api_key.is_expired:
+                return JsonResponse(
+                    {'status': 'error', 'message': 'Chave de API expirada. Gere ou renove em /account/.'},
+                    status=401,
+                )
             request.api_user = api_key.user
             ApiKey.objects.filter(pk=api_key.pk).update(last_used_at=timezone.now())
 
@@ -531,7 +689,8 @@ def api_endpoint(name, methods):
             else:
                 response = view(request)
             _log_request(request.api_user, 'api', name, request.method, response.status_code,
-                         getattr(request, 'log_blockchain', ''), getattr(request, 'log_cost', None))
+                         getattr(request, 'log_blockchain', ''), getattr(request, 'log_cost', None),
+                         tx_hash=getattr(request, 'log_hash', ''))
             return response
         return wrapper
     return decorator
@@ -552,6 +711,7 @@ def api_store(request):
             owner=request.api_user.pk,
         )
         request.log_cost = _estimate_or_none(blockchain, data.get('payload', ''), bool(data.get('password')))
+        request.log_hash = hashes[0] if hashes else ''
         return JsonResponse({
             'status': 'success', 'hashes': hashes, 'blockchain': blockchain,
             'estimated_cost': _cost_summary(request.log_cost),
@@ -592,6 +752,7 @@ def api_migrate(request):
             source_hash, target, multiple_tx=bool(data.get('multiple_tx', False)), owner=request.api_user.pk,
         )
         request.log_cost = _estimate_or_none(target, res['payload_migrated'], False)
+        request.log_hash = res['new_hashes'][0] if res.get('new_hashes') else ''
         res['estimated_cost'] = _cost_summary(request.log_cost)
         return JsonResponse({'status': 'success', 'data': res})
     except Exception as e:

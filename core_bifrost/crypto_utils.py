@@ -30,11 +30,6 @@ def encrypt_payload(data: str, password: str):
     return token, salt.hex(), _verifier(key_1)
 
 
-def verify_password(password: str, salt: str, verifier: str) -> bool:
-    key_1, _ = _derive_keys(password, bytes.fromhex(salt))
-    return hmac.compare_digest(_verifier(key_1), verifier)
-
-
 def decrypt_payload(token: str, password: str, salt: str, verifier: str) -> str:
     """Decifra. Levanta DecryptionError se a senha estiver errada ou o dado estiver corrompido."""
     key_1, key_2 = _derive_keys(password, bytes.fromhex(salt))

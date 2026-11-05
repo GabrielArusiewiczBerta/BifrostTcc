@@ -28,3 +28,10 @@ cloudflared
 
 # Chave secreta gerada localmente
 .secret_key
+
+# Chaves de teste das redes reais (Stellar, Bitcoin, Ethereum)
+.testnet_keys.json
+
+# Arquivos de trabalho do Claude Code (não fazem parte do projeto)
+.claude/
+CLAUDE.md

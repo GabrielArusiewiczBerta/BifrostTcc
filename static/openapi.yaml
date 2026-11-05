@@ -1,0 +1,759 @@
+openapi: 3.0.3
+info:
+  title: NodeConnect API
+  description: |
+    API REST de interoperabilidade entre blockchains do NodeConnect (arquitetura Bifröst,
+    notary scheme). Todas as operações de escrita fragmentam automaticamente payloads que
+    excedem o limite por transação da rede escolhida (`multiple_tx`), suportam criptografia
+    opcional no servidor (Fernet + PBKDF2) e são isoladas por usuário dono da chave de API.
+
+    Por padrão todos os adaptadores rodam em modo simulação (nenhuma rede real é chamada).
+    Redes com integração real disponível (Stellar Testnet, Bitcoin Testnet, Ethereum Sepolia)
+    podem ser ligadas pelo operador da instância; quando ligada, os hashes retornados são
+    hashes de transação de verdade, consultáveis no explorador público da respectiva rede.
+
+    ## Passo a passo pra começar a usar
+
+    1. **Crie uma conta** no site (`/register/`) e faça login.
+    2. **Gere sua chave de API** em `/account/` (botão "Gerar chave de API"). Ela aparece em
+       texto puro só nesse instante — copie e guarde agora, porque o servidor só fica com o
+       hash dela, não dá pra recuperar depois. A chave vale **1 hora**; antes de expirar, use o
+       botão "Renovar validade" na mesma página (mantém a mesma chave) ou gere uma nova.
+    3. **Autentique toda chamada** com o cabeçalho `Authorization: Bearer <sua_chave>`. Pode
+       testar direto por aqui: clique no botão **Authorize** no topo desta página, cole a chave
+       (sem a palavra "Bearer", só o valor) e todo "Try it out" já sai autenticado.
+    4. **Grave um dado**: `POST /api/store/` com `payload` (o conteúdo) e `blockchain` (a rede).
+       A resposta traz uma lista de `hashes` — se o payload coube numa transação só, é um hash;
+       se foi fragmentado (`multiple_tx: true`), são vários, mas o **primeiro** da lista já serve
+       pra recuperar tudo de volta.
+    5. **Leia de volta**: `GET /api/retrieve/?hash=<hash>` (ou o `POST` equivalente, se preferir
+       mandar a senha no corpo em vez do cabeçalho). Se gravou com `password`, mande ela no
+       cabeçalho `X-Bifrost-Password` — nunca na URL, por segurança.
+    6. **Migre pra outra rede**, se quiser: `POST /api/migrate/` com `source_hash` (qualquer hash
+       da cadeia original) e `target_blockchain`.
+    7. **Estime o custo antes de gravar** (opcional, não grava nada): `POST /api/estimate/`.
+    8. **Liste tudo que você já gravou**: `GET /api/transactions/`.
+
+    ### Exemplo de ponta a ponta com curl
+
+    ```bash
+    # Troque <sua_chave> pela chave gerada em /account/ e <host> pelo endereço desta instância
+    export CHAVE="<sua_chave>"
+    export HOST="<host>"   # ex.: http://127.0.0.1:8000 ou o link público/túnel
+
+    # 1) Gravar um dado
+    curl -X POST "$HOST/api/store/" \
+      -H "Authorization: Bearer $CHAVE" \
+      -H "Content-Type: application/json" \
+      -d '{"payload": "olá mundo", "blockchain": "STELLAR"}'
+    # -> {"status": "success", "hashes": ["<hash>"], "blockchain": "STELLAR", ...}
+
+    # 2) Recuperar esse dado (troque <hash> pelo valor recebido acima)
+    curl "$HOST/api/retrieve/?hash=<hash>" \
+      -H "Authorization: Bearer $CHAVE"
+    ```
+
+    Cada endpoint abaixo também tem seu próprio exemplo `curl`, pronto pra copiar e colar, na
+    descrição dele.
+  version: "1.0.0"
+  contact:
+    name: NodeConnect
+servers:
+  - url: /
+    description: Mesma origem da instância em uso (local, rede local ou túnel público)
+
+security:
+  - BearerAuth: []
+
+tags:
+  - name: Dados
+    description: Armazenar, recuperar e migrar dados entre blockchains
+  - name: Consulta
+    description: Consultar o ledger de transações
+  - name: Custo
+    description: Estimar custo de uma operação antes de executá-la
+
+paths:
+  /api/store/:
+    post:
+      tags: [Dados]
+      summary: Armazena um payload em uma blockchain
+      description: |
+        Fragmenta automaticamente o payload em múltiplas transações encadeadas se ele exceder
+        o limite por transação da rede escolhida (requer `multiple_tx: true`). Se `password`
+        for informado, o payload é cifrado no servidor antes da gravação.
+
+        **Como rodar:**
+        ```bash
+        curl -X POST "$HOST/api/store/" \
+          -H "Authorization: Bearer $CHAVE" \
+          -H "Content-Type: application/json" \
+          -d '{"payload": "olá mundo", "blockchain": "STELLAR"}'
+        ```
+        Guarde o primeiro hash da resposta (`hashes[0]`): é o que você vai usar em
+        `/api/retrieve/` e `/api/migrate/` depois.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StoreRequest'
+            examples:
+              simples:
+                summary: Texto curto, sem senha, numa única transação
+                value: { payload: "olá mundo", blockchain: "RBB" }
+              cifrado_fragmentado:
+                summary: Cifrado no servidor e fragmentado em várias transações
+                value: { payload: "Relatório financeiro confidencial do terceiro trimestre, com valores e observações internas.", blockchain: "STELLAR", password: "minhaSenha", multiple_tx: true }
+              com_redundancia:
+                summary: Grava também uma cópia no espelho PostgreSQL
+                value: { payload: "dado crítico que não pode se perder", blockchain: "ETHEREUM", redundancy: true }
+      responses:
+        '200':
+          description: Payload gravado com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StoreResponse'
+              examples:
+                unica_transacao:
+                  summary: Coube numa única transação, sem custo (rede permissionada)
+                  value:
+                    status: success
+                    hashes: ["rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"]
+                    blockchain: RBB
+                    estimated_cost: { transactions: 1, fee_native: 0, symbol: "-", fee_usd: 0 }
+                fragmentado_com_custo:
+                  summary: Payload cifrado que precisou de 3 transações na Stellar
+                  value:
+                    status: success
+                    hashes:
+                      - "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+                      - "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1"
+                      - "c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1b2"
+                    blockchain: STELLAR
+                    estimated_cost: { transactions: 3, fee_native: 0.00003, symbol: XLM, fee_usd: 0.0000036 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/retrieve/:
+    get:
+      tags: [Dados]
+      summary: Recupera um payload por hash de transação (GET)
+      description: |
+        A senha, se necessária, nunca deve ir na URL: use o cabeçalho `X-Bifrost-Password`.
+        Reconstrói automaticamente fragmentos encadeados, na ordem original de gravação.
+
+        **Como rodar:**
+        ```bash
+        # Sem senha
+        curl "$HOST/api/retrieve/?hash=<hash>" -H "Authorization: Bearer $CHAVE"
+
+        # Com senha (payload gravado com `password` no /api/store/)
+        curl "$HOST/api/retrieve/?hash=<hash>" \
+          -H "Authorization: Bearer $CHAVE" \
+          -H "X-Bifrost-Password: minhaSenha"
+        ```
+      parameters:
+        - name: hash
+          in: query
+          required: true
+          schema: { type: string }
+          description: Hash de qualquer fragmento pertencente à cadeia da transação
+          example: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+        - name: X-Bifrost-Password
+          in: header
+          required: false
+          schema: { type: string }
+          description: Senha de descriptografia, se o dado foi gravado com senha
+          example: minhaSenha
+      responses:
+        '200':
+          $ref: '#/components/responses/RetrieveOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      tags: [Dados]
+      summary: Recupera um payload por hash de transação (POST)
+      description: |
+        Alternativa ao GET; permite enviar a senha no corpo em vez do cabeçalho.
+
+        **Como rodar:**
+        ```bash
+        curl -X POST "$HOST/api/retrieve/" \
+          -H "Authorization: Bearer $CHAVE" \
+          -H "Content-Type: application/json" \
+          -d '{"hash": "<hash>", "password": "minhaSenha"}'
+        ```
+        (omita `"password"` se o dado não foi gravado com senha)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hash]
+              properties:
+                hash: { type: string }
+                password: { type: string, description: "Alternativa ao cabeçalho X-Bifrost-Password" }
+            examples:
+              texto_puro:
+                summary: Sem senha
+                value: { hash: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9" }
+              cifrado:
+                summary: Enviando a senha no corpo em vez do cabeçalho
+                value: { hash: "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1", password: "minhaSenha" }
+      responses:
+        '200':
+          $ref: '#/components/responses/RetrieveOk'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/migrate/:
+    post:
+      tags: [Dados]
+      summary: Migra um dado já armazenado para outra blockchain
+      description: |
+        Copia o payload (mantendo-o cifrado, se for o caso) da rede de origem para a rede de
+        destino, preservando o salt e o verificador de senha originais.
+
+        **Como rodar:**
+        ```bash
+        curl -X POST "$HOST/api/migrate/" \
+          -H "Authorization: Bearer $CHAVE" \
+          -H "Content-Type: application/json" \
+          -d '{"source_hash": "<hash>", "target_blockchain": "ETHEREUM"}'
+        ```
+        O `source_hash` pode ser qualquer hash da cadeia original (não precisa ser o primeiro).
+        Se o payload não couber numa transação só na rede de destino, mande `"multiple_tx": true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MigrateRequest'
+            examples:
+              simples:
+                summary: Migra de RBB para Ethereum, numa única transação
+                value: { source_hash: "rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a", target_blockchain: "ETHEREUM" }
+              fragmentado:
+                summary: Payload maior que o limite da rede de destino
+                value: { source_hash: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9", target_blockchain: "STELLAR", multiple_tx: true }
+      responses:
+        '200':
+          description: Migração concluída com sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MigrateResponse'
+              examples:
+                migracao_simples:
+                  summary: Payload em texto puro, migrado numa única transação
+                  value:
+                    status: success
+                    data:
+                      source_hash: "rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"
+                      source_blockchain: RBB
+                      target_blockchain: ETHEREUM
+                      new_hashes: ["0xd4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1b2c3"]
+                      encrypted: false
+                      payload_migrated: "olá mundo"
+                      estimated_cost: { transactions: 1, fee_native: 0.0001214, symbol: ETH, fee_usd: 0.3642 }
+                migracao_cifrada_fragmentada:
+                  summary: Payload cifrado, migrado em 3 transações na rede de destino
+                  value:
+                    status: success
+                    data:
+                      source_hash: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+                      source_blockchain: RBB
+                      target_blockchain: STELLAR
+                      new_hashes:
+                        - "c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1b2"
+                        - "d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1b2c3"
+                        - "e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1b2c3d4"
+                      encrypted: true
+                      payload_migrated: "gAAAAABn... (permanece cifrado; o servidor só copia os bytes)"
+                      estimated_cost: { transactions: 3, fee_native: 0.00003, symbol: XLM, fee_usd: 0.0000036 }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/transactions/:
+    get:
+      tags: [Consulta]
+      summary: Lista as transações do dono da chave de API
+      description: |
+        Nunca expõe salt, verificador de senha ou identificador do dono.
+
+        **Como rodar:**
+        ```bash
+        curl "$HOST/api/transactions/" -H "Authorization: Bearer $CHAVE"
+        ```
+      responses:
+        '200':
+          description: Lista de transações
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionsResponse'
+              examples:
+                com_transacoes:
+                  value:
+                    status: success
+                    count: 2
+                    transactions:
+                      - hash: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+                        blockchain_name: STELLAR
+                        issued_at: "2026-09-29T02:10:18.412Z"
+                        hash_next: "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1"
+                        payload_preview: "olá mundo"
+                        encrypted: false
+                      - hash: "rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"
+                        blockchain_name: RBB
+                        issued_at: "2026-09-20T01:59:44.001Z"
+                        hash_next: "rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"
+                        payload_preview: "[criptografado]"
+                        encrypted: true
+                vazia:
+                  summary: Nenhuma transação registrada ainda
+                  value: { status: success, count: 0, transactions: [] }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+
+  /api/estimate/:
+    post:
+      tags: [Custo]
+      summary: Estima o custo de uma operação em todas as redes suportadas
+      description: |
+        Calcula, por fórmula fechada (sem chamadas externas), o custo em token nativo e em
+        dólares, o número de transações necessárias e a viabilidade em cada rede suportada.
+        Não grava nada nem é contabilizado como uso de armazenamento.
+
+        **Como rodar:**
+        ```bash
+        curl -X POST "$HOST/api/estimate/" \
+          -H "Authorization: Bearer $CHAVE" \
+          -H "Content-Type: application/json" \
+          -d '{"payload": "texto de exemplo", "multiple_tx": true}'
+        ```
+        A resposta vem ordenada da rede mais barata pra mais cara (`estimates[0]` é a mais em conta).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstimateRequest'
+            examples:
+              por_payload:
+                summary: Estimativa pelo texto real que será gravado
+                value: { payload: "texto de exemplo", multiple_tx: true }
+              por_tamanho:
+                summary: "Estimativa só pelo tamanho, sem enviar o conteúdo (ex.: já cifrado no cliente)"
+                value: { size_bytes: 500, encrypted: true, multiple_tx: true }
+              com_cotacoes_customizadas:
+                summary: Sobrescrevendo as cotações e taxas padrão
+                value: { payload: "texto de exemplo", gas_price_gwei: 12, usd_eth: 3500, usd_btc: 65000 }
+      responses:
+        '200':
+          description: Estimativas por rede, ordenadas da mais barata para a mais cara
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateResponse'
+              examples:
+                sete_redes:
+                  summary: "Estimativa de \"texto de exemplo\" (16 bytes) nas 7 redes suportadas"
+                  value:
+                    status: success
+                    params:
+                      gas_price_gwei: 5
+                      fee_rate_sat_vb: 10
+                      stellar_base_fee_stroops: 100
+                      usd_prices: { ETH: 3000, BTC: 60000, XLM: 0.12, EOS: 0.7 }
+                    estimates:
+                      - blockchain: EOS
+                        name: "EOS Jungle"
+                        symbol: EOS
+                        payload_bytes: 16
+                        onchain_bytes: 16
+                        encrypted: false
+                        max_size: 256
+                        fragments: 1
+                        feasible: true
+                        note: null
+                        fee_native: 0
+                        fee_usd: 0
+                        details: { net_bytes: 152 }
+                        precision: "aproximada (modelo de recursos, sem taxa por transação)"
+                      - blockchain: STELLAR
+                        name: "Stellar Testnet"
+                        symbol: XLM
+                        payload_bytes: 16
+                        onchain_bytes: 16
+                        encrypted: false
+                        max_size: 28
+                        fragments: 1
+                        feasible: true
+                        note: null
+                        fee_native: 0.00001
+                        fee_usd: 0.0000012
+                        details: { operacoes: 1 }
+                        precision: "exata (taxa base por operação)"
+                      - blockchain: BITCOIN
+                        name: "Bitcoin Testnet"
+                        symbol: BTC
+                        payload_bytes: 16
+                        onchain_bytes: 16
+                        encrypted: false
+                        max_size: 80
+                        fragments: 1
+                        feasible: true
+                        note: null
+                        fee_native: 0.0000011
+                        fee_usd: 0.066
+                        details: { vbytes: 110 }
+                        precision: "exata para 1 entrada P2WPKH; taxa em sat/vB é parâmetro"
+                      - blockchain: ETHEREUM
+                        name: "Ethereum Sepolia"
+                        symbol: ETH
+                        payload_bytes: 16
+                        onchain_bytes: 16
+                        encrypted: false
+                        max_size: 1024
+                        fragments: 1
+                        feasible: true
+                        note: null
+                        fee_native: 0.000105
+                        fee_usd: 0.315
+                        details: { gas: 21024 }
+                        precision: "exata (unidades de gas); preço do gas é parâmetro"
+                fragmenta_e_barra_multiple_tx:
+                  summary: Payload que excede o limite da rede e multiple_tx não foi habilitado
+                  value:
+                    status: success
+                    params: { gas_price_gwei: 5, fee_rate_sat_vb: 10, stellar_base_fee_stroops: 100, usd_prices: { ETH: 3000, BTC: 60000, XLM: 0.12, EOS: 0.7 } }
+                    estimates:
+                      - blockchain: STELLAR
+                        name: "Stellar Testnet"
+                        symbol: XLM
+                        payload_bytes: 100
+                        onchain_bytes: 100
+                        encrypted: false
+                        max_size: 28
+                        fragments: 4
+                        feasible: false
+                        note: "Excede o limite por transação: ative multiple_tx (fragmentação)."
+                        fee_native: 0.00004
+                        fee_usd: 0.0000048
+                        details: { operacoes: 4 }
+                        precision: "exata (taxa base por operação)"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '405':
+          $ref: '#/components/responses/MethodNotAllowed'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Chave de API pessoal, gerada em `/account/`. Envie como
+        `Authorization: Bearer <chave>`. A chave é exibida em texto puro apenas uma vez,
+        no momento em que é gerada; o servidor guarda somente o hash.
+
+  responses:
+    BadRequest:
+      description: Requisição inválida (payload vazio, blockchain desconhecida, tamanho excede o limite sem multiple_tx, JSON malformado etc.)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            excede_limite:
+              summary: Payload excede o limite da rede e multiple_tx não foi habilitado
+              value: { status: error, message: "Tamanho dos dados (100 bytes) excede o limite máximo por transação da blockchain Stellar (28 bytes). Ative 'multiple_tx=True' para permitir fragmentação." }
+            payload_vazio:
+              summary: Campo obrigatório ausente
+              value: { status: error, message: "O conteúdo a armazenar não pode ser vazio." }
+            blockchain_invalida:
+              summary: Código de blockchain não suportado
+              value: { status: error, message: "Blockchain desconhecida: XYZ" }
+            corpo_invalido:
+              summary: Corpo da requisição não é um JSON válido
+              value: { status: error, message: "Corpo da requisição deve ser um JSON válido." }
+    Unauthorized:
+      description: |
+        Chave de API ausente, inválida ou expirada. As chaves valem 1h a partir da geração
+        (ou da última renovação) e precisam ser renovadas ou geradas de novo em `/account/`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            ausente_ou_invalida:
+              summary: "Cabeçalho ausente, chave que nunca existiu, foi revogada ou é de usuário desativado (mesma mensagem por segurança, nunca revela o motivo)"
+              value: { status: error, message: "Chave de API ausente ou inválida. Use Authorization: Bearer <chave>." }
+            expirada:
+              summary: Chave válida, mas passou de 1h desde a geração ou última renovação
+              value: { status: error, message: "Chave de API expirada. Gere ou renove em /account/." }
+    Forbidden:
+      description: Senha de descriptografia incorreta ou dado corrompido
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            senha_errada:
+              summary: Senha informada não confere com o verificador gravado
+              value: { status: error, message: "Senha incorreta." }
+            dado_corrompido:
+              summary: Payload cifrado incompleto ou adulterado
+              value: { status: error, message: "Dado corrompido ou incompleto: não foi possível decifrar." }
+    NotFound:
+      description: Hash de transação não encontrado no ledger, ou dados ausentes no adaptador da rede
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          examples:
+            hash_inexistente:
+              summary: "Hash nunca existiu no ledger, ou pertence a outro usuário (mesma mensagem, nunca revela a quem pertence)"
+              value: { status: error, message: "Transação com hash a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9 não foi encontrada no banco de dados." }
+            dados_ausentes_no_adaptador:
+              summary: "Hash existe no ledger, mas o adaptador da rede não encontra mais os dados (ex.: rede real com dado fora do índice)"
+              value: { status: error, message: "Dados da transação a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9 não encontrados no adaptador STELLAR." }
+    MethodNotAllowed:
+      description: Método HTTP não suportado por este endpoint
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+          examples:
+            somente_post:
+              summary: "Endpoint que só aceita POST (ex.: /api/store/, /api/migrate/, /api/estimate/)"
+              value: { error: "Método não permitido. Use POST." }
+            get_ou_post:
+              summary: "Endpoint que aceita GET ou POST (/api/retrieve/)"
+              value: { error: "Método não permitido. Use GET ou POST." }
+    ServerError:
+      description: |
+        Erro interno inesperado (ex.: adaptador de rede lançou uma exceção não tratada).
+        A mensagem é sempre genérica; o detalhe real vai só para o log do servidor.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+          example: { status: error, message: "Erro interno do servidor." }
+    RetrieveOk:
+      description: Payload recuperado com sucesso
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, example: success }
+              data: { $ref: '#/components/schemas/RetrievedData' }
+          examples:
+            texto_puro:
+              value:
+                status: success
+                data:
+                  blockchain: STELLAR
+                  transaction_hash: "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+                  linked_hashes:
+                    - "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9"
+                    - "b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9a1"
+                  payload: "olá mundo, este é um teste de recuperação de dados fragmentados"
+                  encrypted: false
+                  decrypted: false
+                  issued_at: "2026-09-29T02:10:18.412Z"
+            cifrado_e_descriptografado:
+              summary: Payload cifrado, recuperado com a senha correta
+              value:
+                status: success
+                data:
+                  blockchain: RBB
+                  transaction_hash: "rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"
+                  linked_hashes: ["rbb_0x8f2a1c9e4b7d3f6a1c8e2b5d9f4a7c3e6b1d8f5a2c9e4b7d3f6a1c8e2b5d9f4a"]
+                  payload: "conteúdo confidencial"
+                  encrypted: true
+                  decrypted: true
+                  issued_at: "2026-09-20T01:59:44.001Z"
+
+  schemas:
+    Blockchain:
+      type: string
+      enum: [RBB, BITCOIN, ETHEREUM, STELLAR, EOS, POSTGRES, MULTICHAIN]
+      description: |
+        RBB (Rede Blockchain Brasil, permissionada), BITCOIN (testnet, OP_RETURN),
+        ETHEREUM (testnet, calldata), STELLAR (testnet, memo_text), EOS (jungle, action memo),
+        POSTGRES (espelho de redundância) e MULTICHAIN (rede privada).
+
+    ErrorResponse:
+      type: object
+      properties:
+        status: { type: string, example: error }
+        message: { type: string }
+
+    CostSummary:
+      type: object
+      nullable: true
+      description: Presente apenas quando a estimativa de custo foi calculada com sucesso.
+      properties:
+        transactions: { type: integer, description: "Número de transações on-chain geradas" }
+        fee_native: { type: number, format: double }
+        symbol: { type: string, example: ETH }
+        fee_usd: { type: number, format: double }
+
+    StoreRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload: { type: string, description: "Conteúdo a armazenar" }
+        blockchain: { allOf: [{ $ref: '#/components/schemas/Blockchain' }], default: RBB }
+        password: { type: string, description: "Se informada, o payload é cifrado no servidor antes de gravar (Fernet + PBKDF2)" }
+        multiple_tx: { type: boolean, default: false, description: "Permite fragmentar em múltiplas transações se exceder o limite da rede" }
+        redundancy: { type: boolean, default: false, description: "Cria uma cópia adicional no espelho PostgreSQL" }
+
+    StoreResponse:
+      type: object
+      properties:
+        status: { type: string, example: success }
+        hashes:
+          type: array
+          items: { type: string }
+          description: "Um hash por fragmento gravado, na ordem de gravação"
+        blockchain: { type: string }
+        estimated_cost: { $ref: '#/components/schemas/CostSummary' }
+
+    RetrievedData:
+      type: object
+      properties:
+        blockchain: { type: string }
+        transaction_hash: { type: string }
+        linked_hashes:
+          type: array
+          items: { type: string }
+        payload: { type: string }
+        encrypted: { type: boolean }
+        decrypted: { type: boolean, description: "true se o payload retornado já foi descriptografado com a senha informada" }
+        issued_at: { type: string, format: date-time }
+
+    MigrateRequest:
+      type: object
+      required: [source_hash]
+      properties:
+        source_hash: { type: string }
+        target_blockchain: { allOf: [{ $ref: '#/components/schemas/Blockchain' }], default: ETHEREUM }
+        multiple_tx: { type: boolean, default: false }
+
+    MigrateResponse:
+      type: object
+      properties:
+        status: { type: string, example: success }
+        data:
+          type: object
+          properties:
+            source_hash: { type: string }
+            source_blockchain: { type: string }
+            target_blockchain: { type: string }
+            new_hashes:
+              type: array
+              items: { type: string }
+            encrypted: { type: boolean }
+            payload_migrated: { type: string, description: "Payload copiado (permanece cifrado, se for o caso)" }
+            estimated_cost: { $ref: '#/components/schemas/CostSummary' }
+
+    Transaction:
+      type: object
+      properties:
+        hash: { type: string }
+        blockchain_name: { type: string }
+        issued_at: { type: string, format: date-time }
+        hash_next: { type: string, description: "Próximo hash da cadeia (o último aponta de volta para o primeiro)" }
+        payload_preview: { type: string, description: "Prévia do conteúdo, ou \"[criptografado]\" se houver senha" }
+        encrypted: { type: boolean }
+
+    TransactionsResponse:
+      type: object
+      properties:
+        status: { type: string, example: success }
+        count: { type: integer }
+        transactions:
+          type: array
+          items: { $ref: '#/components/schemas/Transaction' }
+
+    EstimateRequest:
+      type: object
+      description: "Informe `payload` ou `size_bytes` (pelo menos um dos dois)."
+      properties:
+        payload: { type: string }
+        size_bytes: { type: integer, minimum: 1, maximum: 50000000 }
+        encrypted: { type: boolean, default: false }
+        multiple_tx: { type: boolean, default: false }
+        gas_price_gwei: { type: number, description: "Padrão: 5" }
+        fee_rate_sat_vb: { type: number, description: "Padrão: 10" }
+        stellar_base_fee_stroops: { type: number, description: "Padrão: 100" }
+        usd_eth: { type: number, description: "Cotação de ETH em USD. Padrão: 3000" }
+        usd_btc: { type: number, description: "Cotação de BTC em USD. Padrão: 60000" }
+        usd_xlm: { type: number, description: "Cotação de XLM em USD. Padrão: 0.12" }
+        usd_eos: { type: number, description: "Cotação de EOS em USD. Padrão: 0.7" }
+
+    EstimateItem:
+      type: object
+      properties:
+        blockchain: { type: string }
+        name: { type: string }
+        symbol: { type: string }
+        payload_bytes: { type: integer }
+        onchain_bytes: { type: integer, description: "Tamanho gravado na rede (maior que payload_bytes se criptografado)" }
+        encrypted: { type: boolean }
+        max_size: { type: integer, description: "Limite de bytes por transação da rede" }
+        fragments: { type: integer }
+        feasible: { type: boolean, description: "false se fragmenta e multiple_tx não foi habilitado" }
+        note: { type: string, nullable: true }
+        fee_native: { type: number, format: double }
+        fee_usd: { type: number, format: double }
+        details: { type: object, description: "Unidades específicas da rede (ex.: gas, vbytes, operacoes)" }
+        precision: { type: string }
+
+    EstimateResponse:
+      type: object
+      properties:
+        status: { type: string, example: success }
+        params: { type: object, description: "Parâmetros efetivamente usados na estimativa (padrões mesclados com overrides)" }
+        estimates:
+          type: array
+          items: { $ref: '#/components/schemas/EstimateItem' }
+          description: "Uma entrada por rede suportada, ordenada da mais barata para a mais cara"

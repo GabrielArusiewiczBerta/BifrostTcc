@@ -28,7 +28,7 @@ class BaseAdapter:
     HASH_PREFIX = ""
 
     @classmethod
-    def store_wrapper(cls, text: str, pw: str = None, multiple_tx: bool = False):
+    def store_wrapper(cls, text: str, pw: str = None, multiple_tx: bool = False, owner=None):
         salt = ""
         key = ""
         if pw:
@@ -41,12 +41,14 @@ class BaseAdapter:
                 f"da blockchain {cls.NAME} ({cls.MAX_SIZE} bytes). Ative 'multiple_tx=True' para permitir fragmentação."
             )
 
-        hashes = [cls.store_chunk(chunk) for chunk in chunks]
+        hashes = [cls.store_chunk(chunk, owner=owner) for chunk in chunks]
         return hashes, salt, key
 
     @classmethod
-    def store_chunk(cls, chunk: str) -> str:
-        """Simulação: grava no ledger local. Adaptadores reais sobrescrevem este método."""
+    def store_chunk(cls, chunk: str, owner=None) -> str:
+        """Simulação: grava no ledger local. Adaptadores reais sobrescrevem este método.
+        `owner` (dono da operação) é ignorado aqui; adaptadores reais o usam para decidir
+        entre a chave de blockchain própria do usuário ou a chave central (core_bifrost/user_keys.py)."""
         tx_hash = cls.HASH_PREFIX + hashlib.sha256(f"{cls.__name__}:{uuid.uuid4()}:{chunk}".encode('utf-8')).hexdigest()
         db.sim_put(tx_hash, cls.__name__, chunk)
         return tx_hash

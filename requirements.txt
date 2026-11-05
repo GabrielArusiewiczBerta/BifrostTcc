@@ -1,2 +1,6 @@
 Django>=4.2,<5
 cryptography>=41
+stellar-sdk>=16
+web3>=8
+bitcoin-utils>=0.8
+xhtml2pdf>=0.2.16

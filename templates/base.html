@@ -86,6 +86,12 @@
                     <span>Minha Conta e API</span>
                 </a>
             </li>
+            <li>
+                <a href="{% url 'api_docs' %}" class="nav-link" target="_blank" rel="noopener">
+                    <i class="fa-solid fa-book"></i>
+                    <span>Documentação da API</span>
+                </a>
+            </li>
         </ul>
         <form method="POST" action="{% url 'logout' %}" style="margin-top: auto; padding: 1rem;">
             {% csrf_token %}
@@ -106,7 +112,11 @@
             </div>
             <div class="status-badge">
                 <div class="status-dot"></div>
+                {% if real_networks_enabled %}
+                <span>Conectado a rede(s) real(is) de teste: {{ real_networks_enabled|join:", " }}</span>
+                {% else %}
                 <span>Modo simulação: nenhuma rede real conectada</span>
+                {% endif %}
             </div>
         </header>
 

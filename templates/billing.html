@@ -59,6 +59,40 @@
     {% endif %}
 </div>
 
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem;"><i class="fa-solid fa-file-invoice-dollar" style="color: var(--emerald, #10b981);"></i> Minhas Faturas</h3>
+    <p style="color: var(--text-dim); font-size: 0.8rem; margin-bottom: 1rem;">
+        <i class="fa-solid fa-circle-info"></i> Fatura mensal simulada (trabalho acadêmico, sem valor fiscal real), gerada a partir do custo contabilizado acima. Normalmente sai sozinha no início do mês seguinte.
+    </p>
+    <form method="POST" action="{% url 'invoice_pay_advance' %}" style="margin-bottom: 1.25rem;">
+        {% csrf_token %}
+        <button type="submit" class="btn-submit"><i class="fa-solid fa-bolt"></i> Pagar fatura antecipada (zera o que você deve até agora)</button>
+    </form>
+    {% if invoices %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>Período</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Boleto</th></tr></thead>
+            <tbody>
+                {% for inv in invoices %}
+                <tr>
+                    <td>{{ inv.month|stringformat:"02d" }}/{{ inv.year }}</td>
+                    <td><strong>R$ {{ inv.amount_brl }}</strong></td>
+                    <td>{{ inv.due_date|date:"d/m/Y" }}</td>
+                    <td>{% if inv.status == 'pago' %}<span style="color: var(--emerald, #10b981);">Pago (simulado)</span>{% else %}<span style="color: var(--amber);">Pendente</span>{% endif %}</td>
+                    <td style="display: flex; gap: 0.4rem;">
+                        <a href="{% url 'invoice_boleto' inv.pk %}" class="nav-link" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">Ver boleto</a>
+                        <a href="{% url 'invoice_boleto_pdf' inv.pk %}" class="nav-link" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;" title="Baixar PDF"><i class="fa-solid fa-file-pdf"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); padding: 1rem 0;">Nenhuma fatura gerada ainda. Faturas saem no início do mês seguinte, com base no custo do mês anterior.</p>
+    {% endif %}
+</div>
+
 {% if operations %}
 <div class="glass-card">
     <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-clock-rotate-left" style="color: var(--cyan);"></i> Últimas operações cobradas</h3>
