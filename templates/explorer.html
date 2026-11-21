@@ -1,0 +1,71 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Explorador de Ledger & Histórico de Transações{% endblock %}
+{% block page_subtitle %}Visualização global de todas as transações gravadas nas blockchains suportadas pelo NodeConnect{% endblock %}
+
+{% block content %}
+<div class="glass-card">
+    <div class="section-header">
+        <h3><i class="fa-solid fa-list-check" style="color: var(--cyan);"></i> Histórico Completo de Transações Registradas</h3>
+        <span style="font-size: 0.85rem; color: var(--text-dim);">Total: {{ all_transactions|length }} registros</span>
+    </div>
+
+    {% if all_transactions %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead>
+                <tr>
+                    <th>Hash da Transação</th>
+                    <th>Blockchain</th>
+                    <th>Criptografia</th>
+                    <th>Prévia do Conteúdo</th>
+                    <th>Próximo Hash (Multi-TX Chain)</th>
+                    <th>Data / Hora</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tx in all_transactions %}
+                <tr>
+                    <td>
+                        <span class="hash-badge" title="{{ tx.hash }}">{{ tx.hash|slice:":20" }}...</span>
+                    </td>
+                    <td>
+                        <span class="badge-tag indigo">{{ tx.blockchain_name }}</span>
+                    </td>
+                    <td>
+                        {% if tx.encrypted %}
+                        <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-lock"></i> Criptografado</span>
+                        {% else %}
+                        <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Texto Puro</span>
+                        {% endif %}
+                    </td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">{{ tx.payload_preview|default:"-" }}</td>
+                    <td>
+                        {% if tx.hash_next and tx.hash_next != tx.hash %}
+                        <span class="hash-badge" style="color: var(--amber); border-color: rgba(245, 158, 11, 0.3);" title="{{ tx.hash_next }}">{{ tx.hash_next|slice:":12" }}...</span>
+                        {% else %}
+                        <span style="color: var(--text-dim); font-size: 0.8rem;">- (Único / Final)</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-dim);">{{ tx.issued_at|slice:":19" }}</td>
+                    <td>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <button onclick="copyToClipboard('{{ tx.hash }}')" class="nav-link" style="padding: 0.3rem 0.5rem; font-size: 0.8rem; background: rgba(255,255,255,0.05);" title="Copiar Hash">
+                                <i class="fa-regular fa-copy"></i>
+                            </button>
+                            <a href="{% url 'retrieve' %}?hash={{ tx.hash }}" class="nav-link" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(6, 182, 212, 0.15); color: var(--cyan);" title="Consultar Transação">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); text-align: center; padding: 2rem;">Nenhuma transação encontrada no banco de dados.</p>
+    {% endif %}
+</div>
+{% endblock %}

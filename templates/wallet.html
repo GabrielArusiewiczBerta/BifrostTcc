@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Carteira — Credenciais de Rede{% endblock %}
+{% block page_subtitle %}Painel unificado das suas credenciais por blockchain, sem chaves privadas armazenadas{% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
+    <h3 style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-key" style="color: var(--amber);"></i> Chave de Blockchain: Central ou Própria
+    </h3>
+    <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem;">
+        Por padrão, as operações nas redes reais usam uma chave central compartilhada por todos os usuários.
+        Gere uma chave própria por rede pra assinar com uma carteira só sua (ela começa sem saldo, é preciso
+        financiar numa faucet de testnet). A chave fica cifrada no servidor; não é possível exportá-la depois.
+    </p>
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>Blockchain</th><th>Chave em uso</th><th>Endereço</th><th>Ações</th></tr></thead>
+            <tbody>
+                {% for row in own_key_rows %}
+                <tr>
+                    <td><span class="badge-tag indigo">{{ row.code }}</span></td>
+                    {% if row.key %}
+                    <td><span style="color: var(--emerald, #10b981);">Própria</span></td>
+                    <td style="color: var(--text-muted); font-size: 0.8rem; word-break: break-all;">{{ row.key.public_address }}</td>
+                    <td>
+                        <form method="POST" action="{% url 'wallet_delete_key' row.code %}" onsubmit="return confirm('Remover a chave própria? Volta a usar a chave central.');">
+                            {% csrf_token %}
+                            <button type="submit" class="nav-link" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(244,63,94,0.12); border: none; cursor: pointer; color: var(--rose, #f43f5e);">
+                                <i class="fa-solid fa-trash"></i> Remover
+                            </button>
+                        </form>
+                    </td>
+                    {% else %}
+                    <td style="color: var(--text-dim);">Central (compartilhada)</td>
+                    <td style="color: var(--text-dim); font-size: 0.8rem;">-</td>
+                    <td>
+                        <form method="POST" action="{% url 'wallet_generate_key' row.code %}" onsubmit="return confirm('Gerar uma chave própria pra {{ row.code }}? Ela começa sem saldo.');">
+                            {% csrf_token %}
+                            <button type="submit" class="nav-link" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; background: rgba(255,255,255,0.1); border: none; cursor: pointer;">
+                                <i class="fa-solid fa-plus"></i> Gerar chave própria
+                            </button>
+                        </form>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="glass-card" style="max-width: 850px; margin: 0 auto 2rem auto;">
+    <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-wallet" style="color: var(--amber);"></i> Adicionar Credencial
+    </h3>
+
+    <form method="POST" action="{% url 'wallet' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="blockchain">Blockchain:</label>
+            <select name="blockchain" id="blockchain" class="form-select">
+                {% for bc in blockchains %}
+                <option value="{{ bc.code }}">{{ bc.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="label">Rótulo:</label>
+            <input type="text" name="label" id="label" class="form-input" placeholder="Ex.: Carteira principal" required>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="external_id">Identificador Externo (endereço público, opcional):</label>
+            <input type="text" name="external_id" id="external_id" class="form-input" placeholder="Ex.: endereço ou identificador da conta nesta rede">
+        </div>
+
+        <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem;">
+            <i class="fa-solid fa-circle-info"></i> Nenhuma chave privada é solicitada ou armazenada aqui — apenas um rótulo e, opcionalmente, um identificador público.
+        </p>
+
+        <button type="submit" class="btn-submit">
+            <i class="fa-solid fa-plus"></i> Adicionar Credencial
+        </button>
+    </form>
+</div>
+
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <div class="section-header">
+        <h3><i class="fa-solid fa-list" style="color: var(--cyan);"></i> Credenciais Registradas</h3>
+        <span style="font-size: 0.85rem; color: var(--text-dim);">Total: {{ credentials|length }}</span>
+    </div>
+
+    {% if credentials %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead>
+                <tr>
+                    <th>Blockchain</th>
+                    <th>Rótulo</th>
+                    <th>Identificador Externo</th>
+                    <th>Conectado em</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cred in credentials %}
+                <tr>
+                    <td><span class="badge-tag indigo">{{ cred.blockchain }}</span></td>
+                    <td>{{ cred.label }}</td>
+                    <td style="color: var(--text-muted); font-size: 0.85rem;">{{ cred.external_id|default:"-" }}</td>
+                    <td style="font-size: 0.8rem; color: var(--text-dim);">{{ cred.connected_at|date:"d/m/Y H:i" }}</td>
+                    <td>
+                        <div style="display: flex; gap: 0.4rem;">
+                            <button type="button" class="nav-link" style="padding: 0.3rem 0.5rem; font-size: 0.8rem; background: rgba(255,255,255,0.05); border: none; cursor: pointer;"
+                                    title="Renomear" onclick="editCredential({{ cred.pk }}, '{{ cred.label|escapejs }}', '{{ cred.external_id|escapejs }}')">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            <form method="POST" action="{% url 'wallet_credential_delete' cred.pk %}" onsubmit="return confirm('Remover esta credencial?');">
+                                {% csrf_token %}
+                                <button type="submit" class="nav-link" style="padding: 0.3rem 0.5rem; font-size: 0.8rem; background: rgba(244,63,94,0.12); border: none; cursor: pointer; color: var(--rose, #f43f5e);" title="Remover">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); text-align: center; padding: 2rem;">Nenhuma credencial registrada ainda.</p>
+    {% endif %}
+</div>
+
+<div id="edit-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); align-items: center; justify-content: center; z-index: 50;">
+    <div class="glass-card" style="max-width: 420px; width: 90%;">
+        <h3 style="margin-bottom: 1.25rem;"><i class="fa-solid fa-pen" style="color: var(--amber);"></i> Renomear Credencial</h3>
+        <form id="edit-form" method="POST">
+            {% csrf_token %}
+            <div class="form-group">
+                <label class="form-label" for="edit-label">Rótulo:</label>
+                <input type="text" name="label" id="edit-label" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="edit-external-id">Identificador Externo:</label>
+                <input type="text" name="external_id" id="edit-external-id" class="form-input">
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="submit" class="btn-submit">Salvar</button>
+                <button type="button" class="nav-link" style="background: rgba(255,255,255,0.08); border: none; cursor: pointer;" onclick="document.getElementById('edit-modal').style.display='none';">Cancelar</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function editCredential(pk, label, externalId) {
+    var form = document.getElementById('edit-form');
+    form.action = '/carteira/' + pk + '/renomear/';
+    document.getElementById('edit-label').value = label;
+    document.getElementById('edit-external-id').value = externalId;
+    document.getElementById('edit-modal').style.display = 'flex';
+}
+</script>
+{% endblock %}

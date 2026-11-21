@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Recuperar e Descriptografar Dados{% endblock %}
+{% block page_subtitle %}Busca de transação por Hash e reconstituição automática de dados fragmentados (função retrieve()){% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-magnifying-glass" style="color: var(--cyan);"></i> Consultar Hash de Transação
+    </h3>
+
+    <form method="POST" action="{% url 'retrieve' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="hash">Hash da Transação:</label>
+            <input type="text" name="hash" id="hash" class="form-input" placeholder="Cole aqui o hash da transação (ex: 0x7a8f... ou rbb_0x...)" value="{{ input_hash }}" required>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="password"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Senha de Descriptografia (Se o dado foi protegido por senha):</label>
+            <input type="password" name="password" id="password" class="form-input" placeholder="Digite a senha caso a transação esteja criptografada">
+        </div>
+
+        <button type="submit" class="btn-submit">
+            <i class="fa-solid fa-search"></i> Buscar e Recompor Dados
+        </button>
+    </form>
+</div>
+
+{% if retrieved_result %}
+<div class="glass-card" style="max-width: 850px; margin: 2rem auto 0 auto; border-color: rgba(6, 182, 212, 0.4);">
+    <h3 style="color: var(--cyan); margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-file-invoice"></i> Dados Recuperados da Blockchain
+    </h3>
+
+    <div style="background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.95rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+            <span><strong>Blockchain Identificada:</strong> <span class="badge-tag indigo">{{ retrieved_result.blockchain }}</span></span>
+            <span><strong>Data do Registro:</strong> <span style="color: var(--text-dim);">{{ retrieved_result.issued_at|slice:":19" }}</span></span>
+        </div>
+
+        <p style="margin-bottom: 1rem;">
+            <strong>Status de Criptografia:</strong> 
+            {% if retrieved_result.encrypted %}
+            <span style="color: var(--emerald); font-weight: 600;"><i class="fa-solid fa-shield-halved"></i> {% if retrieved_result.decrypted %}Criptografado (senha verificada){% else %}Criptografado (informe a senha para decifrar){% endif %}</span>
+            {% else %}
+            <span style="color: var(--text-dim);"><i class="fa-solid fa-lock-open"></i> Não Criptografado</span>
+            {% endif %}
+        </p>
+
+        <div style="margin-bottom: 1.25rem;">
+            <strong style="display: block; margin-bottom: 0.5rem; color: var(--text-muted);">Encadeamento de Hashes Vinculados (Multi-TX Chain):</strong>
+            {% for h in retrieved_result.linked_hashes %}
+            <span class="hash-badge" style="display: inline-block; margin-right: 0.4rem; margin-bottom: 0.4rem;">{{ h|slice:":24" }}...</span>
+            {% endfor %}
+        </div>
+
+        <div>
+            <strong style="display: block; margin-bottom: 0.5rem; color: var(--emerald);">{% if retrieved_result.encrypted and not retrieved_result.decrypted %}Conteúdo cifrado (sem senha):{% else %}Conteúdo / Payload Reconstituído:{% endif %}</strong>
+            <div style="background: rgba(15, 23, 42, 0.9); padding: 1.25rem; border-radius: 8px; border: 1px solid var(--border-glass); white-space: pre-wrap; font-family: 'Fira Code', monospace; font-size: 0.95rem; color: var(--text-main);">{{ retrieved_result.payload }}</div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

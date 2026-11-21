@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Meu Consumo{% endblock %}
+{% block page_subtitle %}Histórico consolidado de custo simulado das suas operações, filtrável por blockchain e período{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1.5rem; align-items: center;">
+    <span style="color: var(--text-muted);">Período:</span>
+    {% for value, label in periods %}
+    <a href="?period={{ value }}&blockchain={{ blockchain }}" class="nav-link {% if period == value %}active{% endif %}" style="padding: 0.4rem 0.9rem;">{{ label }}</a>
+    {% endfor %}
+    <span style="color: var(--text-muted); margin-left: 1rem;">Blockchain:</span>
+    <a href="?period={{ period }}&blockchain=" class="nav-link {% if not blockchain %}active{% endif %}" style="padding: 0.4rem 0.9rem;">Todas</a>
+    {% for bc in blockchains %}
+    <a href="?period={{ period }}&blockchain={{ bc.code }}" class="nav-link {% if blockchain == bc.code %}active{% endif %}" style="padding: 0.4rem 0.9rem;">{{ bc.code }}</a>
+    {% endfor %}
+</div>
+
+<div class="stats-grid">
+    <div class="glass-card stat-card">
+        <div class="stat-icon amber"><i class="fa-solid fa-coins"></i></div>
+        <div class="stat-info"><div class="label">Custo estimado total</div><div class="value">US$ {{ totals.cost|default:0|floatformat:4 }}</div></div>
+    </div>
+    <div class="glass-card stat-card">
+        <div class="stat-icon cyan"><i class="fa-solid fa-hashtag"></i></div>
+        <div class="stat-info"><div class="label">Transações on-chain</div><div class="value">{{ totals.txs|default:0 }}</div></div>
+    </div>
+    <div class="glass-card stat-card">
+        <div class="stat-icon emerald"><i class="fa-solid fa-database"></i></div>
+        <div class="stat-info"><div class="label">Bytes gravados</div><div class="value">{{ totals.volume|default:0 }}</div></div>
+    </div>
+</div>
+
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem;"><i class="fa-solid fa-chart-pie" style="color: var(--amber);"></i> Custo por blockchain</h3>
+    {% if chains %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead>
+                <tr><th>Blockchain</th><th>Custo (USD)</th><th></th><th>Custo (nativo)</th><th>Transações</th><th>Volume (bytes)</th><th>Operações</th></tr>
+            </thead>
+            <tbody>
+                {% for c in chains %}
+                <tr>
+                    <td><span class="badge-tag indigo">{{ c.blockchain }}</span></td>
+                    <td><strong>US$ {{ c.cost|floatformat:4 }}</strong></td>
+                    <td style="min-width: 120px;"><div style="background: rgba(255,255,255,0.08); border-radius: 4px; height: 8px;"><div style="width: {{ c.bar }}%; height: 8px; border-radius: 4px; background: var(--amber);"></div></div></td>
+                    <td>{% if c.native %}{{ c.native|floatformat:8 }} {{ c.symbol }}{% else %}sem taxa{% endif %}</td>
+                    <td>{{ c.txs }}</td>
+                    <td>{{ c.volume }}</td>
+                    <td>{{ c.ops }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); padding: 1rem 0;">Nenhuma operação de gravação ou migração registrada neste período/blockchain.</p>
+    {% endif %}
+</div>
+
+<div class="glass-card" style="margin-bottom: 2rem;">
+    <h3 style="margin-bottom: 0.5rem;"><i class="fa-solid fa-file-invoice-dollar" style="color: var(--emerald, #10b981);"></i> Minhas Faturas</h3>
+    <p style="color: var(--text-dim); font-size: 0.8rem; margin-bottom: 1rem;">
+        <i class="fa-solid fa-circle-info"></i> Fatura mensal simulada (trabalho acadêmico, sem valor fiscal real), gerada a partir do custo contabilizado acima. Normalmente sai sozinha no início do mês seguinte.
+    </p>
+    <form method="POST" action="{% url 'invoice_pay_advance' %}" style="margin-bottom: 1.25rem;">
+        {% csrf_token %}
+        <button type="submit" class="btn-submit"><i class="fa-solid fa-bolt"></i> Pagar fatura antecipada (zera o que você deve até agora)</button>
+    </form>
+    {% if invoices %}
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>Período</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Boleto</th></tr></thead>
+            <tbody>
+                {% for inv in invoices %}
+                <tr>
+                    <td>{{ inv.month|stringformat:"02d" }}/{{ inv.year }}</td>
+                    <td><strong>R$ {{ inv.amount_brl }}</strong></td>
+                    <td>{{ inv.due_date|date:"d/m/Y" }}</td>
+                    <td>{% if inv.status == 'pago' %}<span style="color: var(--emerald, #10b981);">Pago (simulado)</span>{% else %}<span style="color: var(--amber);">Pendente</span>{% endif %}</td>
+                    <td style="display: flex; gap: 0.4rem;">
+                        <a href="{% url 'invoice_boleto' inv.pk %}" class="nav-link" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;">Ver boleto</a>
+                        <a href="{% url 'invoice_boleto_pdf' inv.pk %}" class="nav-link" style="padding: 0.3rem 0.7rem; font-size: 0.8rem;" title="Baixar PDF"><i class="fa-solid fa-file-pdf"></i></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-dim); padding: 1rem 0;">Nenhuma fatura gerada ainda. Faturas saem no início do mês seguinte, com base no custo do mês anterior.</p>
+    {% endif %}
+</div>
+
+{% if operations %}
+<div class="glass-card">
+    <h3 style="margin-bottom: 1rem;"><i class="fa-solid fa-clock-rotate-left" style="color: var(--cyan);"></i> Últimas operações cobradas</h3>
+    <div class="table-responsive">
+        <table class="custom-table">
+            <thead><tr><th>Quando</th><th>Operação</th><th>Blockchain</th><th>Transações</th><th>Custo (USD)</th></tr></thead>
+            <tbody>
+                {% for op in operations %}
+                <tr>
+                    <td style="font-size: 0.8rem; color: var(--text-dim);">{{ op.created_at|date:"d/m/Y H:i:s" }}</td>
+                    <td>{{ op.endpoint }}</td>
+                    <td><span class="badge-tag indigo">{{ op.blockchain }}</span></td>
+                    <td>{{ op.tx_count }}</td>
+                    <td>US$ {{ op.cost_usd|floatformat:4 }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

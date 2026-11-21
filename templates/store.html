@@ -1,0 +1,198 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Armazenar Dados na Blockchain{% endblock %}
+{% block page_subtitle %}Gravação de dados arbitrários em ledgers através do adaptador NodeConnect (função store()){% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 850px; margin: 0 auto;">
+    <h3 style="margin-bottom: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-cloud-arrow-up" style="color: var(--cyan);"></i> Formulário de Armazenamento Multi-Chain
+    </h3>
+
+    <form method="POST" action="{% url 'store' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label class="form-label" for="blockchain">Selecione a Blockchain Alvo:</label>
+            <select name="blockchain" id="blockchain" class="form-select">
+                {% for bc in blockchains %}
+                <option value="{{ bc.code }}">
+                    {{ bc.name }} (Limite: {{ bc.max_size }} por transação)
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="payload">Conteúdo / Dado a Armazenar:</label>
+            <textarea name="payload" id="payload" class="form-textarea" placeholder="Digite ou cole aqui a informação ou dados que deseja gravar na blockchain..." required></textarea>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label" for="password"><i class="fa-solid fa-key" style="color: var(--amber);"></i> Senha de Criptografia (Opcional, aplicada no servidor):</label>
+            <input type="password" name="password" id="password" class="form-input" placeholder="Se fornecida, o servidor cifra o dado (Fernet + PBKDF2) antes de gravá-lo">
+        </div>
+
+        <div class="toggle-group">
+            <label class="toggle-label">
+                <input type="checkbox" name="multiple_tx" checked>
+                <span>Permitir fragmentação em múltiplas transações (multiple_tx) se exceder o limite</span>
+            </label>
+
+            <label class="toggle-label">
+                <input type="checkbox" name="redundancy">
+                <span>Criar cópia de redundância em espelho PostgreSQL</span>
+            </label>
+        </div>
+
+
+        <div id="cost-panel" style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;" aria-live="polite"></div>
+        <div id="progress-panel" style="display: none; background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: var(--radius-md); padding: 1rem 1.25rem; margin-bottom: 1.25rem;" aria-live="polite"></div>
+        <button type="submit" class="btn-submit" id="submit-btn">
+            <i class="fa-solid fa-paper-plane"></i> Enviar e Gravar na Blockchain
+        </button>
+    </form>
+</div>
+
+<div id="js-result"></div>
+
+{% if success_result %}
+<div class="glass-card" style="max-width: 850px; margin: 2rem auto 0 auto; border-color: rgba(16, 185, 129, 0.4);">
+    <h3 style="color: var(--emerald); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem;">
+        <i class="fa-solid fa-circle-check"></i> Resultado da Gravação na Blockchain
+    </h3>
+
+    <div style="background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md); font-size: 0.9rem;">
+        <p style="margin-bottom: 0.5rem;"><strong>Blockchain Alvo:</strong> <span class="badge-tag indigo">{{ success_result.blockchain }}</span></p>
+        <p style="margin-bottom: 0.5rem;"><strong>Total de Hashes Gerados:</strong> {{ success_result.count }}</p>
+        {% if success_result.cost %}
+        <p style="margin-bottom: 1rem;"><strong>Custo estimado (equivalente na mainnet):</strong>
+            {% if success_result.cost.fee_native %}{{ success_result.cost.fee_native|floatformat:8 }} {{ success_result.cost.symbol }} (US$ {{ success_result.cost.fee_usd|floatformat:4 }}){% else %}sem taxa por transação{% endif %}
+        </p>
+        {% endif %}
+        <p style="margin-bottom: 1rem;"><strong>Proteção por Criptografia:</strong> {% if success_result.encrypted %}<span style="color: var(--emerald);">Ativa (Salt/Chave)</span>{% else %}<span style="color: var(--text-dim);">Não (Texto Puro)</span>{% endif %}</p>
+
+        <strong style="display: block; margin-bottom: 0.5rem; color: var(--cyan);">Hashes de Transação (Guarde estes hashes para recuperar o dado):</strong>
+        {% for h in success_result.hashes %}
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+            <span class="hash-badge" style="flex: 1;">{{ h }}</span>
+            <button onclick="copyToClipboard('{{ h }}')" style="background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;">
+                <i class="fa-regular fa-copy"></i> Copiar
+            </button>
+            <a href="{% url 'retrieve' %}?hash={{ h }}" style="background: rgba(6, 182, 212, 0.2); color: var(--cyan); text-decoration: none; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem;">
+                <i class="fa-solid fa-magnifying-glass"></i> Testar Busca
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% load static %}
+<script src="{% static 'js/cost_preview.js' %}"></script>
+<script src="{% static 'js/progress_flow.js' %}"></script>
+<script>
+initCostPreview({
+    url: "{% url 'preview_store_cost' %}",
+    panelId: 'cost-panel',
+    submitId: 'submit-btn',
+    idleMessage: 'Digite o conteúdo para ver o custo antes de enviar.',
+    buildBody: function (form) {
+        var payload = form.payload.value.trim();
+        if (!payload) return null;
+        return {
+            blockchain: form.blockchain.value,
+            payload: payload,
+            encrypted: form.password.value.length > 0,
+            multiple_tx: form.multiple_tx.checked,
+        };
+    },
+});
+
+function fmtNative(value, symbol) {
+    if (!value) return 'sem taxa por transação';
+    return value.toLocaleString('pt-BR', { maximumFractionDigits: 8 }) + ' ' + symbol;
+}
+function fmtUsd(value) {
+    return 'US$ ' + value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: value < 0.01 ? 6 : 4 });
+}
+
+initProgressFlow({
+    submitId: 'submit-btn',
+    progressId: 'progress-panel',
+    resultId: 'js-result',
+    startUrl: "{% url 'store_start' %}",
+    stepUrl: "{% url 'store_step' %}",
+    buildStartBody: function (form) {
+        var payload = form.payload.value.trim();
+        if (!payload) return null;
+        return {
+            blockchain: form.blockchain.value,
+            payload: payload,
+            password: form.password.value,
+            multiple_tx: form.multiple_tx.checked,
+            redundancy: form.redundancy.checked,
+        };
+    },
+    stepLabel: function (d) {
+        return d.total <= 1 ? 'Gravando na blockchain...' : 'Gravando fragmento ' + d.progress + ' de ' + d.total + '...';
+    },
+    renderResult: function (d) {
+        var el = progressFlowHelpers.el;
+        var card = el('div', null, 'max-width: 850px; margin: 2rem auto 0 auto; border: 1px solid rgba(16, 185, 129, 0.4); border-radius: var(--radius-md, 12px); padding: 1.5rem; background: var(--glass-bg, rgba(255,255,255,0.03));');
+        var title = el('h3', null, 'color: var(--emerald); margin-bottom: 1rem; display: flex; align-items: center; gap: 0.75rem;');
+        title.appendChild(el('i', null, null, 'fa-solid fa-circle-check'));
+        title.appendChild(document.createTextNode('Resultado da Gravação na Blockchain'));
+        card.appendChild(title);
+
+        var body = el('div', null, 'background: rgba(0,0,0,0.3); padding: 1.25rem; border-radius: var(--radius-md, 8px); font-size: 0.9rem;');
+
+        var pBlockchain = el('p', null, 'margin-bottom: 0.5rem;');
+        pBlockchain.appendChild(el('strong', 'Blockchain Alvo: '));
+        pBlockchain.appendChild(el('span', d.blockchain, null, 'badge-tag indigo'));
+        body.appendChild(pBlockchain);
+
+        body.appendChild(el('p', 'Total de Hashes Gerados: ' + d.count, 'margin-bottom: 0.5rem;'));
+
+        if (d.cost) {
+            var costText = d.cost.fee_native ? fmtNative(d.cost.fee_native, d.cost.symbol) + ' (' + fmtUsd(d.cost.fee_usd) + ')' : 'sem taxa por transação';
+            var pCost = el('p', null, 'margin-bottom: 1rem;');
+            pCost.appendChild(el('strong', 'Custo estimado (equivalente na mainnet): '));
+            pCost.appendChild(document.createTextNode(costText));
+            body.appendChild(pCost);
+        }
+
+        var pEnc = el('p', null, 'margin-bottom: 1rem;');
+        pEnc.appendChild(el('strong', 'Proteção por Criptografia: '));
+        pEnc.appendChild(el('span', d.encrypted ? 'Ativa (Salt/Chave)' : 'Não (Texto Puro)', 'color: ' + (d.encrypted ? 'var(--emerald)' : 'var(--text-dim)') + ';'));
+        body.appendChild(pEnc);
+
+        body.appendChild(el('strong', 'Hashes de Transação (Guarde estes hashes para recuperar o dado):', 'display: block; margin-bottom: 0.5rem; color: var(--cyan);'));
+
+        d.hashes.forEach(function (h) {
+            var row = el('div', null, 'display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;');
+            row.appendChild(el('span', h, 'flex: 1;', 'hash-badge'));
+
+            var copyBtn = el('button', null, 'background: rgba(255,255,255,0.1); border: none; color: white; padding: 0.3rem 0.6rem; border-radius: 4px; cursor: pointer;');
+            copyBtn.type = 'button';
+            copyBtn.appendChild(el('i', null, null, 'fa-regular fa-copy'));
+            copyBtn.appendChild(document.createTextNode(' Copiar'));
+            copyBtn.addEventListener('click', function () { copyToClipboard(h); });
+            row.appendChild(copyBtn);
+
+            var link = el('a', null, 'background: rgba(6, 182, 212, 0.2); color: var(--cyan); text-decoration: none; padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem;');
+            link.href = "{% url 'retrieve' %}?hash=" + encodeURIComponent(h);
+            link.appendChild(el('i', null, null, 'fa-solid fa-magnifying-glass'));
+            link.appendChild(document.createTextNode(' Testar Busca'));
+            row.appendChild(link);
+
+            body.appendChild(row);
+        });
+
+        card.appendChild(body);
+        return card;
+    },
+});
+</script>
+{% endblock %}

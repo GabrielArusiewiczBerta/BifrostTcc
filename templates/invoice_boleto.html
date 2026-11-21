@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+
+{% block page_title %}Fatura {{ invoice.month|stringformat:"02d" }}/{{ invoice.year }}{% endblock %}
+{% block page_subtitle %}Boleto simulado — trabalho acadêmico, sem valor fiscal real{% endblock %}
+
+{% block content %}
+<div class="glass-card" style="max-width: 700px; margin: 0 auto;">
+    <div style="text-align: center; background: rgba(244,63,94,0.12); color: var(--rose, #f43f5e); border-radius: 8px; padding: 0.6rem; font-size: 0.8rem; font-weight: 600; margin-bottom: 1.5rem; letter-spacing: 0.03em;">
+        SIMULAÇÃO — TRABALHO ACADÊMICO (TCC), SEM VALOR FISCAL OU BANCÁRIO REAL
+    </div>
+
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid rgba(255,255,255,0.15); padding-bottom: 1rem; margin-bottom: 1.25rem;">
+        <div style="font-size: 1.4rem; font-weight: 700;"><i class="fa-solid fa-link" style="color: var(--cyan);"></i> NodeConnect</div>
+        <div style="font-family: monospace; font-size: 1.1rem;">{{ invoice.boleto_number }}</div>
+    </div>
+
+    <table class="custom-table" style="margin-bottom: 1.25rem;">
+        <tbody>
+            <tr><td style="color: var(--text-dim); width: 40%;">Beneficiário</td><td>NodeConnect — Plataforma de Interoperabilidade Blockchain</td></tr>
+            <tr><td style="color: var(--text-dim);">Pagador</td><td>{{ invoice.user.get_full_name|default:invoice.user.username }}</td></tr>
+            <tr><td style="color: var(--text-dim);">Referente a</td><td>Uso da plataforma em {{ invoice.month|stringformat:"02d" }}/{{ invoice.year }}</td></tr>
+            <tr><td style="color: var(--text-dim);">Vencimento</td><td>{{ invoice.due_date|date:"d/m/Y" }}</td></tr>
+            <tr><td style="color: var(--text-dim);">Valor</td><td style="font-size: 1.3rem; font-weight: 700; color: var(--amber);">R$ {{ invoice.amount_brl }}</td></tr>
+            <tr><td style="color: var(--text-dim);">Status</td><td>{% if invoice.status == 'pago' %}<span style="color: var(--emerald, #10b981);">Pago (simulado)</span>{% else %}<span style="color: var(--amber);">Pendente</span>{% endif %}</td></tr>
+        </tbody>
+    </table>
+
+    <div style="margin-bottom: 1.5rem;">
+        <div style="color: var(--text-dim); font-size: 0.8rem; margin-bottom: 0.4rem;">Linha digitável</div>
+        <div class="hash-badge" style="display: block; font-size: 1rem; letter-spacing: 0.04em; word-break: break-all; user-select: all;">{{ invoice.linha_digitavel }}</div>
+    </div>
+
+    <div style="margin-bottom: 1.5rem;">
+        <div style="color: var(--text-dim); font-size: 0.8rem; margin-bottom: 0.5rem;">Código de barras (ilustrativo)</div>
+        <div style="display: flex; align-items: flex-end; gap: 1px; height: 50px; background: #fff; border-radius: 4px; padding: 6px 10px;">
+            {% for ch in invoice.boleto_number %}
+            <div style="background: #111; width: {% if forloop.counter0|divisibleby:3 %}3px{% else %}1.5px{% endif %}; height: 100%;"></div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <a href="{% url 'invoice_boleto_pdf' invoice.pk %}" class="nav-link" style="background: rgba(255,255,255,0.1); border: none;">
+            <i class="fa-solid fa-file-pdf"></i> Baixar PDF
+        </a>
+        {% if invoice.status != 'pago' %}
+        <form method="POST" action="{% url 'invoice_mark_paid' invoice.pk %}">
+            {% csrf_token %}
+            <button type="submit" class="btn-submit"><i class="fa-solid fa-circle-check"></i> Marcar como pago (simulado)</button>
+        </form>
+        {% endif %}
+    </div>
+
+    <p style="color: var(--text-dim); font-size: 0.75rem; margin-top: 1.5rem; text-align: center;">
+        Documento gerado automaticamente em {{ invoice.generated_at|date:"d/m/Y H:i" }} para fins de demonstração do TCC. Não efetua nem representa cobrança real.
+    </p>
+</div>
+{% endblock %}

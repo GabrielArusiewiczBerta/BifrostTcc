@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Django / SQLite databases
+*.sqlite3
+db.sqlite3
+bifrost_db.sqlite3
+
+# Local environment & virtualenvs
+.env
+.venv
+venv/
+ENV/
+env/
+
+# IDE & OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+cloudflared
+
+# Chave secreta gerada localmente
+.secret_key
+
+# Chaves de teste das redes reais (Stellar, Bitcoin, Ethereum)
+.testnet_keys.json
+
+# Arquivos de trabalho do Claude Code (não fazem parte do projeto)
+.claude/
+CLAUDE.md

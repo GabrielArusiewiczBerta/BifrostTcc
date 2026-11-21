@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    @page { size: A4; margin: 2cm; }
+    body { font-family: Helvetica, Arial, sans-serif; color: #1a1a1a; font-size: 11pt; }
+    .banner { background-color: #fde8ea; color: #b91c3c; text-align: center; padding: 8px; font-weight: bold;
+               font-size: 9pt; border: 1px solid #f4a4ae; margin-bottom: 16px; }
+    .header { border-bottom: 2px solid #333; padding-bottom: 8px; margin-bottom: 12px; }
+    .header .brand { font-size: 16pt; font-weight: bold; }
+    .header .number { font-family: Courier, monospace; font-size: 11pt; float: right; }
+    table.fields { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+    table.fields td { padding: 6px 4px; border-bottom: 1px solid #ddd; }
+    table.fields td.label { color: #666; width: 35%; }
+    .valor { font-size: 14pt; font-weight: bold; color: #92400e; }
+    .pago { color: #047857; font-weight: bold; }
+    .pendente { color: #92400e; font-weight: bold; }
+    .linha-title { color: #666; font-size: 9pt; margin-bottom: 2px; }
+    .linha { font-family: Courier, monospace; font-size: 11pt; border: 1px solid #ccc; padding: 8px;
+             background-color: #f5f5f5; margin-bottom: 14px; }
+    table.barcode { width: 100%; margin-bottom: 14px; }
+    table.barcode td { height: 36px; background-color: #000; padding: 0; }
+    table.barcode td.gap { background-color: #fff; width: 2px; }
+    .items-title { font-size: 11pt; font-weight: bold; margin-bottom: 6px; margin-top: 8px; }
+    table.items { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 9.5pt; }
+    table.items th { text-align: left; color: #666; font-weight: normal; border-bottom: 1px solid #999; padding: 4px; }
+    table.items td { padding: 4px; border-bottom: 1px solid #eee; }
+    table.items td.hash { font-family: Courier, monospace; }
+    table.items td.valor { text-align: right; white-space: nowrap; }
+    .footer { color: #888; font-size: 8pt; text-align: center; margin-top: 16px; }
+</style>
+</head>
+<body>
+    <div class="banner">SIMULACAO - TRABALHO ACADEMICO (TCC), SEM VALOR FISCAL OU BANCARIO REAL</div>
+
+    <div class="header">
+        <span class="brand">NodeConnect</span>
+        <span class="number">{{ invoice.boleto_number }}</span>
+    </div>
+
+    <table class="fields">
+        <tr><td class="label">Beneficiario</td><td>NodeConnect - Plataforma de Interoperabilidade Blockchain</td></tr>
+        <tr><td class="label">Pagador</td><td>{{ invoice.user.get_full_name|default:invoice.user.username }}</td></tr>
+        <tr><td class="label">Referente a</td><td>Uso da plataforma em {{ invoice.month|stringformat:"02d" }}/{{ invoice.year }}</td></tr>
+        <tr><td class="label">Vencimento</td><td>{{ invoice.due_date|date:"d/m/Y" }}</td></tr>
+        <tr><td class="label">Valor</td><td class="valor">R$ {{ invoice.amount_brl }}</td></tr>
+        <tr><td class="label">Status</td><td>{% if invoice.status == 'pago' %}<span class="pago">Pago (simulado)</span>{% else %}<span class="pendente">Pendente</span>{% endif %}</td></tr>
+    </table>
+
+    <div class="linha-title">Linha digitavel</div>
+    <div class="linha">{{ invoice.linha_digitavel }}</div>
+
+    <div class="linha-title">Codigo de barras (ilustrativo)</div>
+    <table class="barcode"><tr>
+        {% for ch in invoice.boleto_number %}
+        <td style="width: {% if forloop.counter0|divisibleby:3 %}3{% else %}1{% endif %}%;"></td>
+        <td class="gap"></td>
+        {% endfor %}
+    </tr></table>
+
+    {% if items %}
+    <div class="items-title">Detalhamento das operacoes</div>
+    <table class="items">
+        <tr><th>Hash</th><th>Blockchain</th><th style="text-align: right;">Valor</th></tr>
+        {% for item in items %}
+        <tr>
+            <td class="hash">{% if item.tx_hash %}{{ item.tx_hash|slice:":10" }}...{{ item.tx_hash|slice:"-6:" }}{% else %}-{% endif %}</td>
+            <td>{{ item.blockchain }}</td>
+            <td class="valor">R$ {{ item.amount_brl }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% endif %}
+
+    <div class="footer">
+        Documento gerado automaticamente em {{ invoice.generated_at|date:"d/m/Y H:i" }} para fins de demonstracao do TCC.<br>
+        Nao efetua nem representa cobranca real.
+    </div>
+</body>
+</html>

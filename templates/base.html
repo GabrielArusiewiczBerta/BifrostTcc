@@ -1,0 +1,150 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NodeConnect — Interoperabilidade Blockchain{% endblock %}</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    {% if not user.is_authenticated %}<style>.main-wrapper { margin-left: 0; margin-right: auto; width: 100%; max-width: 560px; margin: 0 auto; }</style>{% endif %}
+</head>
+<body>
+
+    {% if user.is_authenticated %}
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">
+                <i class="fa-solid fa-cube"></i>
+            </div>
+            <div class="brand-text">
+                <h1>NodeConnect</h1>
+            </div>
+        </div>
+
+        <ul class="nav-menu">
+            <li>
+                <a href="{% url 'dashboard' %}" class="nav-link {% if active_tab == 'dashboard' %}active{% endif %}">
+                    <i class="fa-solid fa-chart-pie"></i>
+                    <span>Painel Principal</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'store' %}" class="nav-link {% if active_tab == 'store' %}active{% endif %}">
+                    <i class="fa-solid fa-upload"></i>
+                    <span>Armazenar Dados</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'retrieve' %}" class="nav-link {% if active_tab == 'retrieve' %}active{% endif %}">
+                    <i class="fa-solid fa-download"></i>
+                    <span>Recuperar Dados</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'migrate' %}" class="nav-link {% if active_tab == 'migrate' %}active{% endif %}">
+                    <i class="fa-solid fa-right-left"></i>
+                    <span>Migrar Blockchain</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'explorer' %}" class="nav-link {% if active_tab == 'explorer' %}active{% endif %}">
+                    <i class="fa-solid fa-list-check"></i>
+                    <span>Explorador de Ledger</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'wallet' %}" class="nav-link {% if active_tab == 'wallet' %}active{% endif %}">
+                    <i class="fa-solid fa-wallet"></i>
+                    <span>Carteira</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'billing' %}" class="nav-link {% if active_tab == 'billing' %}active{% endif %}">
+                    <i class="fa-solid fa-receipt"></i>
+                    <span>Meu Consumo</span>
+                </a>
+            </li>
+            {% if user.is_staff %}
+            <li>
+                <a href="{% url 'admin_accounting' %}" class="nav-link {% if active_tab == 'admin_accounting' %}active{% endif %}">
+                    <i class="fa-solid fa-ranking-star"></i>
+                    <span>Contabilidade (Admin)</span>
+                </a>
+            </li>
+            {% endif %}
+            <li>
+                <a href="{% url 'account' %}" class="nav-link {% if active_tab == 'account' %}active{% endif %}">
+                    <i class="fa-solid fa-user"></i>
+                    <span>Minha Conta e API</span>
+                </a>
+            </li>
+            <li>
+                <a href="{% url 'api_docs' %}" class="nav-link" target="_blank" rel="noopener">
+                    <i class="fa-solid fa-book"></i>
+                    <span>Documentação da API</span>
+                </a>
+            </li>
+        </ul>
+        <form method="POST" action="{% url 'logout' %}" style="margin-top: auto; padding: 1rem;">
+            {% csrf_token %}
+            <button type="submit" class="nav-link" style="width: 100%; background: none; border: none; cursor: pointer; text-align: left;">
+                <i class="fa-solid fa-right-from-bracket"></i>
+                <span>Sair ({{ user.username }})</span>
+            </button>
+        </form>
+    </aside>
+    {% endif %}
+
+    <!-- Main Wrapper -->
+    <main class="main-wrapper">
+        <header class="top-header">
+            <div class="header-title">
+                <h2>{% block page_title %}Plataforma de Interoperabilidade Blockchain{% endblock %}</h2>
+                <p>{% block page_subtitle %}API de Abstração Genérica para Comunicação Multi-Chain (Notary Scheme){% endblock %}</p>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                {% if real_networks_enabled %}
+                <span>Conectado a rede(s) real(is) de teste: {{ real_networks_enabled|join:", " }}</span>
+                {% else %}
+                <span>Modo simulação: nenhuma rede real conectada</span>
+                {% endif %}
+            </div>
+        </header>
+
+        {% if messages %}
+        <div class="messages-container">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }}">
+                <i class="fa-solid {% if message.tags == 'success' %}fa-circle-check{% else %}fa-circle-exclamation{% endif %}"></i>
+                <span>{{ message }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(function () {
+                var btn = document.activeElement;
+                if (!btn || btn.tagName !== 'BUTTON') return;
+                var original = btn.innerHTML;
+                btn.innerHTML = '<i class="fa-solid fa-check"></i> Copiado';
+                setTimeout(function () { btn.innerHTML = original; }, 1500);
+            });
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
